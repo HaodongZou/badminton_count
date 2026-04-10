@@ -1203,4 +1203,4 @@ if __name__ == '__main__':
     import os
     debug_mode = os.environ.get('FLASK_DEBUG', 'False').lower() == 'true'
     init_db()
-    app.run(debug=debug_mode, port=5000, host='0.0.0.0')
+    app.run(debug=debug_mode, port=18080, host='0.0.0.0')
