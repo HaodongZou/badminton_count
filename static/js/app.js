@@ -127,6 +127,7 @@ function initTabs() {
                 loadPlayers();
                 loadStats(currentPlayer);
             }
+            if (tabId === 'rankings') loadRankings();
         });
     });
 }
@@ -749,6 +750,66 @@ async function deleteAlias(aliasId) {
         }
     } catch (error) {
         showToast('删除失败', 'error');
+    }
+}
+
+// Load Rankings
+async function loadRankings() {
+    const container = document.getElementById('rankingsContainer');
+
+    try {
+        const response = await fetch(`${API_BASE}/api/rankings`, { headers: getAuthHeaders() });
+        if (!response.ok) {
+            container.innerHTML = '<div class="empty-state">暂无排名数据</div>';
+            return;
+        }
+        const data = await response.json();
+        const rankings = data.rankings || [];
+
+        if (rankings.length === 0) {
+            container.innerHTML = '<div class="empty-state">暂无排名数据</div>';
+            return;
+        }
+
+        let html = `
+            <table class="rankings-table">
+                <thead>
+                    <tr>
+                        <th>排名</th>
+                        <th>球员</th>
+                        <th>ELO</th>
+                        <th>胜</th>
+                        <th>负</th>
+                        <th>胜率</th>
+                        <th>场次</th>
+                    </tr>
+                </thead>
+                <tbody>
+        `;
+
+        rankings.forEach(player => {
+            const rankClass = player.rank <= 3 ? `rank-${player.rank}` : '';
+            html += `
+                <tr class="${rankClass}">
+                    <td class="rank-cell">
+                        ${player.rank === 1 ? '🥇' : player.rank === 2 ? '🥈' : player.rank === 3 ? '🥉' : player.rank}
+                    </td>
+                    <td class="player-cell">${escapeHtml(player.player_name)}</td>
+                    <td class="elo-cell">${player.elo_rating}</td>
+                    <td class="wins-cell">${player.wins}</td>
+                    <td class="losses-cell">${player.losses}</td>
+                    <td class="winrate-cell">${player.win_rate}%</td>
+                    <td class="games-cell">${player.games_played}</td>
+                </tr>
+            `;
+        });
+
+        html += '</tbody></table>';
+        container.innerHTML = html;
+
+    } catch (error) {
+        console.error('Load rankings error:', error);
+        container.innerHTML = '<div class="empty-state">加载失败</div>';
     }
 }
 

@@ -1619,3 +1619,110 @@ main {
     background: #e3f2fd;
     color: #1976d2;
 }
+
+/* Rankings Table */
+.rankings-section {
+    padding: 20px;
+}
+
+.rankings-section .section-header {
+    margin-bottom: 20px;
+}
+
+.rankings-section .section-title {
+    font-size: 1.5rem;
+    color: #333;
+    margin: 0;
+}
+
+.rankings-section .section-subtitle {
+    font-size: 0.9rem;
+    color: #666;
+    margin: 4px 0 0 0;
+}
+
+.rankings-table {
+    width: 100%;
+    border-collapse: collapse;
+    background: white;
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+}
+
+.rankings-table th {
+    background: #f5f5f0;
+    padding: 12px 16px;
+    text-align: left;
+    font-weight: 600;
+    color: #555;
+    font-size: 0.9rem;
+}
+
+.rankings-table td {
+    padding: 12px 16px;
+    border-bottom: 1px solid #f0f0f0;
+    color: #333;
+}
+
+.rankings-table tr:last-child td {
+    border-bottom: none;
+}
+
+.rankings-table tr.rank-1 {
+    background: linear-gradient(90deg, #fff9e6 0%, rgba(255,215,0,0.1) 100%);
+}
+
+.rankings-table tr.rank-2 {
+    background: linear-gradient(90deg, #f5f5f5 0%, rgba(192,192,192,0.1) 100%);
+}
+
+.rankings-table tr.rank-3 {
+    background: linear-gradient(90deg, #fff5f5 0%, rgba(205,127,50,0.1) 100%);
+}
+
+.rank-cell {
+    font-size: 1.1rem;
+    font-weight: 700;
+}
+
+.rank-cell:has(🥇),
+.rank-cell:has(🥈),
+.rank-cell:has(🥉) {
+    font-size: 1rem;
+}
+
+.player-cell {
+    font-weight: 600;
+}
+
+.elo-cell {
+    font-family: 'Roboto Mono', monospace;
+    color: #FF6B35;
+    font-weight: 600;
+}
+
+.wins-cell {
+    color: #4CAF50;
+    font-weight: 600;
+}
+
+.losses-cell {
+    color: #f44336;
+    font-weight: 600;
+}
+
+.winrate-cell {
+    font-family: 'Roboto Mono', monospace;
+}
+
+.games-cell {
+    color: #888;
+}
+
+.empty-state {
+    text-align: center;
+    padding: 40px;
+    color: #999;
+    font-size: 1rem;
+}

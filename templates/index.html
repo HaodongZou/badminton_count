@@ -42,6 +42,10 @@
                 <span class="tab-icon">🔄</span>
                 <span>双打排列</span>
             </button>
+            <button class="tab" data-tab="rankings">
+                <span class="tab-icon">🏆</span>
+                <span>排名</span>
+            </button>
         </div>
 
         <!-- Input Tab -->
@@ -189,6 +193,19 @@
                 <!-- Arrangement Result -->
                 <div class="arrangement-result" id="arrangementResult" style="display: none;">
                     <div class="arrangement-matches" id="arrangementMatches"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Rankings Tab -->
+        <div class="tab-content" id="rankings">
+            <div class="rankings-section">
+                <div class="section-header">
+                    <h3 class="section-title">🏆 球员排名</h3>
+                    <p class="section-subtitle">基于ELO评分系统</p>
+                </div>
+                <div id="rankingsContainer">
+                    <div class="loading"><div class="spinner"></div></div>
                 </div>
             </div>
         </div>
