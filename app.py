@@ -549,6 +549,34 @@ def _parse_ju_results(text):
 
     return results
 
+def _parse_ju_results_with_game_numbers(text):
+    """
+    提取每局的胜负结果，返回 {game_num: outcome} 字典
+    用于补充真实比分，比如"第一局21:15，第二局赢了"
+    game_num: 1-based integer
+    outcome: 'win' 或 'loss'
+    """
+    text_no_space = re.sub(r'\s+', '', text)
+    results = {}
+
+    # 匹配第X局赢了/输了（赢了/输了可能有两个字）
+    ju_pattern = r'第([零一二三四五六七八九十两\d]+)局[赢了输][了]*'
+    for m in re.finditer(ju_pattern, text_no_space):
+        game_num_str = m.group(1)
+        game_num = _parse_chinese_number(game_num_str)
+        outcome_char = m.group(0)[-2]  # 倒数第二个字符是赢/输
+        results[game_num] = 'win' if outcome_char in ['赢', '胜'] else 'loss'
+
+    # 两局都赢了/输了
+    if '两局都赢了' in text_no_space or '都赢了' in text_no_space:
+        results[1] = 'win'
+        results[2] = 'win'
+    elif '两局都输了' in text_no_space or '都输了' in text_no_space:
+        results[1] = 'loss'
+        results[2] = 'loss'
+
+    return results
+
 def _generate_scores_from_wins_losses(wins, losses):
     """根据胜负局数生成虚拟比分"""
     scores = []
@@ -639,18 +667,21 @@ def parse_match_input(text):
             result['scores'] = [[int(m.group(1)), int(m.group(2))] for m in score_matches]
 
         # 补充：提取每局胜负标记（如"第二局赢了"）来补全比分
-        ju_results = _parse_ju_results(text)
+        ju_results = _parse_ju_results_with_game_numbers(text)
         if ju_results:
-            # 真实比分有几局，每局胜负标记有几局
+            # 真实比分有几局
             real_game_count = len(result['scores'])
-            ju_game_count = len(ju_results)
-            # 如果胜负标记比真实比分多，补全虚拟比分
-            if ju_game_count > real_game_count:
-                for i in range(real_game_count, ju_game_count):
-                    if ju_results[i] == 'win':
-                        result['scores'].append([21, 0])
-                    else:
-                        result['scores'].append([0, 21])
+            # ju_results 是 dict {game_num: outcome}，找到最大的游戏号
+            max_ju_game = max(ju_results.keys()) if ju_results else 0
+            # 如果最大游戏号大于真实比分数量，需要补全
+            if max_ju_game > real_game_count:
+                for game_i in range(1, max_ju_game + 1):
+                    if game_i not in range(1, real_game_count + 1):
+                        # 这个游戏没有真实比分，使用ju_results中的胜负
+                        if ju_results.get(game_i, 'win') == 'win':
+                            result['scores'].append([21, 0])
+                        else:
+                            result['scores'].append([0, 21])
 
     # ========== 3. 移除比分和局数标记，得到纯选手文本 ==========
     # 移除局数标记和胜负结果：第1局赢了、第2局输了、两局都赢了 等
@@ -695,8 +726,8 @@ def parse_match_input(text):
     result['my_team'] = [p for p in result['my_team'] if p and p != '我']
     result['opponent_team'] = [p for p in result['opponent_team'] if p]
 
-    # 确保"我"在己方队伍中
-    if '我' not in result['my_team']:
+    # 如果输入中包含"我"，确保"我"在己方队伍中
+    if '我' in text and '我' not in result['my_team']:
         result['my_team'].insert(0, '我')
 
     my_count = len(result['my_team'])
