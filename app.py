@@ -197,18 +197,22 @@ def recalculate_all_ratings():
     cursor.execute('DELETE FROM player_ratings')
     conn.commit()
 
-    # 按时间顺序重放所有比赛
+    # 按时间顺序重放所有比赛（逐局更新ELO）
     cursor.execute('SELECT * FROM matches ORDER BY date ASC')
     for match in cursor.fetchall():
         my_team = [p.strip() for p in match['my_team'].split(',') if p.strip()]
         opp_team = [p.strip() for p in match['opponent_team'].split(',') if p.strip()]
-        my_won = match['winner'] == 'me'
+        scores = json.loads(match['scores']) if match['scores'] else []
 
         for p in my_team + opp_team:
             initialize_player_rating(conn, cursor, p)
         conn.commit()
 
-        update_ratings_after_match(my_team, opp_team, my_won, conn)
+        # 逐局更新ELO
+        for game in scores:
+            my_score, opp_score = game[0], game[1]
+            my_won = my_score > opp_score
+            update_ratings_after_match(my_team, opp_team, my_won, conn)
 
     conn.close()
 
@@ -221,29 +225,35 @@ def get_rankings():
     cursor.execute('SELECT * FROM player_ratings ORDER BY elo_rating DESC, games_played DESC')
     ratings = [dict(row) for row in cursor.fetchall()]
 
-    # 获取每个玩家的胜率统计
-    cursor.execute('SELECT my_team, opponent_team, winner FROM matches')
+    # 获取每个玩家的胜率统计（逐局计算）
+    cursor.execute('SELECT my_team, opponent_team, scores FROM matches')
     matches = cursor.fetchall()
 
     player_stats = {}
     for match in matches:
         my_team = [p.strip() for p in match['my_team'].split(',') if p.strip()]
         opp_team = [p.strip() for p in match['opponent_team'].split(',') if p.strip()]
+        scores = json.loads(match['scores']) if match['scores'] else []
 
         for p in my_team + opp_team:
             if p not in player_stats:
                 player_stats[p] = {'wins': 0, 'losses': 0}
 
-        if match['winner'] == 'me':
-            for p in my_team:
-                player_stats[p]['wins'] += 1
-            for p in opp_team:
-                player_stats[p]['losses'] += 1
-        else:
-            for p in opp_team:
-                player_stats[p]['wins'] += 1
-            for p in my_team:
-                player_stats[p]['losses'] += 1
+        # 逐局计算胜负
+        for game in scores:
+            my_score, opp_score = game[0], game[1]
+            if my_score > opp_score:
+                # 我方赢了这一局
+                for p in my_team:
+                    player_stats[p]['wins'] += 1
+                for p in opp_team:
+                    player_stats[p]['losses'] += 1
+            else:
+                # 对方赢了这一局
+                for p in opp_team:
+                    player_stats[p]['wins'] += 1
+                for p in my_team:
+                    player_stats[p]['losses'] += 1
 
     # 构建排名列表
     rankings = []
@@ -850,17 +860,24 @@ def add_match():
 
     match_id = cursor.lastrowid
 
-    # 更新ELO评分
-    my_won = winner == 'me'
-    elo_changes = update_ratings_after_match(my_team_resolved, opp_team_resolved, my_won, conn)
+    # 更新ELO评分（逐局更新）
+    all_elo_changes = {}
+    for game in parsed['scores']:
+        my_score, opp_score = game[0], game[1]
+        my_won = my_score > opp_score
+        game_elo_changes = update_ratings_after_match(my_team_resolved, opp_team_resolved, my_won, conn)
+        # 累加每局的变化（只记录方向）
+        for p, new_elo in game_elo_changes.items():
+            if p not in all_elo_changes:
+                all_elo_changes[p] = new_elo
 
     cursor.execute('SELECT * FROM matches WHERE id = ?', (match_id,))
     match = dict(cursor.fetchone())
     match['scores'] = json.loads(match['scores'])
     conn.close()
 
-    logger.info(f"Match added: id={match_id}, {parsed['my_team']} vs {parsed['opponent_team']}, ELO: {elo_changes}")
-    return jsonify({**match, 'elo_changes': elo_changes}), 201
+    logger.info(f"Match added: id={match_id}, {parsed['my_team']} vs {parsed['opponent_team']}, ELO: {all_elo_changes}")
+    return jsonify({**match, 'elo_changes': all_elo_changes}), 201
 
 @app.route('/api/matches/<int:match_id>', methods=['DELETE'])
 @require_auth
