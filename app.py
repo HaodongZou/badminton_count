@@ -35,6 +35,11 @@ DISABLE_AUTH = os.environ.get('DISABLE_AUTH', 'false').lower() == 'true'
 LOGIN_USER = os.environ.get('LOGIN_USER', 'admin')
 LOGIN_PASSWORD = os.environ.get('LOGIN_PASSWORD', 'badminton123')
 
+# ELO 评分系统配置
+DEFAULT_ELO = 1500
+K_FACTOR_NEW = 32      # 新玩家（<30场）
+K_FACTOR_ESTABLISHED = 16  # 成熟玩家（>=30场）
+
 # Session serializer
 serializer = Serializer(app.config['SECRET_KEY'], salt='badminton-login')
 
@@ -85,6 +90,188 @@ def is_admin():
     user_data = get_current_user()
     return user_data is not None and user_data.get('is_admin', False)
 
+# =============================================================================
+# ELO Rating System Functions
+# =============================================================================
+
+def get_k_factor(games_played):
+    """根据已玩游戏数返回K因子：新玩家32，成熟玩家16"""
+    return K_FACTOR_NEW if games_played < 30 else K_FACTOR_ESTABLISHED
+
+def calculate_expected_score(player_rating, opponent_rating):
+    """计算预期得分：1 / (1 + 10^((opponent - player) / 400))"""
+    return 1 / (1 + 10 ** ((opponent_rating - player_rating) / 400))
+
+def get_player_rating(player_name):
+    """获取玩家ELO评分（新玩家返回默认1500）"""
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute('SELECT elo_rating, games_played FROM player_ratings WHERE player_name = ?', (player_name,))
+    row = cursor.fetchone()
+    conn.close()
+    if row:
+        return {'elo': row['elo_rating'], 'games': row['games_played']}
+    return {'elo': DEFAULT_ELO, 'games': 0}
+
+def initialize_player_rating(conn, cursor, player_name):
+    """初始化玩家ELO（如果不存在）"""
+    cursor.execute('SELECT elo_rating FROM player_ratings WHERE player_name = ?', (player_name,))
+    if not cursor.fetchone():
+        cursor.execute(
+            'INSERT INTO player_ratings (player_name, elo_rating, games_played) VALUES (?, ?, 0)',
+            (player_name, DEFAULT_ELO)
+        )
+
+def update_ratings_after_match(my_team, opp_team, my_won, conn=None):
+    """
+    比赛结束后更新双方ELO评分
+    my_team: 我方玩家列表
+    opp_team: 对方玩家列表
+    my_won: True表示我方获胜
+    """
+    close_conn = False
+    if conn is None:
+        conn = get_db()
+        close_conn = True
+
+    cursor = conn.cursor()
+    all_players = my_team + opp_team
+
+    # 获取所有玩家当前评分
+    ratings = {}
+    for p in all_players:
+        cursor.execute('SELECT elo_rating, games_played FROM player_ratings WHERE player_name = ?', (p,))
+        row = cursor.fetchone()
+        if row:
+            ratings[p] = {'elo': row['elo_rating'], 'games': row['games_played']}
+        else:
+            ratings[p] = {'elo': DEFAULT_ELO, 'games': 0}
+            cursor.execute(
+                'INSERT INTO player_ratings (player_name, elo_rating, games_played) VALUES (?, ?, 0)',
+                (p, DEFAULT_ELO)
+            )
+
+    # 确定胜负双方
+    winner_team = my_team if my_won else opp_team
+    loser_team = opp_team if my_won else my_team
+
+    # 计算双方平均ELO
+    winner_avg = sum(ratings[p]['elo'] for p in winner_team) / len(winner_team)
+    loser_avg = sum(ratings[p]['elo'] for p in loser_team) / len(loser_team)
+
+    # 计算ELO变化（基于总场次平均值）
+    total_games = sum(ratings[p]['games'] for p in all_players) / len(all_players)
+    k = get_k_factor(int(total_games))
+    expected = calculate_expected_score(winner_avg, loser_avg)
+    change = round(k * (1 - expected))
+
+    # 应用变化
+    for p in winner_team:
+        ratings[p]['elo'] += change
+        ratings[p]['games'] += 1
+    for p in loser_team:
+        ratings[p]['elo'] -= change
+        ratings[p]['games'] += 1
+
+    # 持久化
+    for p, data in ratings.items():
+        cursor.execute('''
+            INSERT INTO player_ratings (player_name, elo_rating, games_played, updated_at)
+            VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(player_name) DO UPDATE SET
+                elo_rating = ?, games_played = ?, updated_at = CURRENT_TIMESTAMP
+        ''', (p, data['elo'], data['games'], data['elo'], data['games']))
+
+    conn.commit()
+    if close_conn:
+        conn.close()
+
+    return {p: ratings[p]['elo'] for p in all_players}
+
+def recalculate_all_ratings():
+    """从比赛历史重新计算所有玩家ELO"""
+    conn = get_db()
+    cursor = conn.cursor()
+
+    # 重置所有评分
+    cursor.execute('DELETE FROM player_ratings')
+    conn.commit()
+
+    # 按时间顺序重放所有比赛
+    cursor.execute('SELECT * FROM matches ORDER BY date ASC')
+    for match in cursor.fetchall():
+        my_team = [p.strip() for p in match['my_team'].split(',') if p.strip()]
+        opp_team = [p.strip() for p in match['opponent_team'].split(',') if p.strip()]
+        my_won = match['winner'] == 'me'
+
+        for p in my_team + opp_team:
+            initialize_player_rating(conn, cursor, p)
+        conn.commit()
+
+        update_ratings_after_match(my_team, opp_team, my_won, conn)
+
+    conn.close()
+
+def get_rankings():
+    """获取所有玩家排名列表"""
+    conn = get_db()
+    cursor = conn.cursor()
+
+    # 获取所有玩家评分
+    cursor.execute('SELECT * FROM player_ratings ORDER BY elo_rating DESC, games_played DESC')
+    ratings = [dict(row) for row in cursor.fetchall()]
+
+    # 获取每个玩家的胜率统计
+    cursor.execute('SELECT my_team, opponent_team, winner FROM matches')
+    matches = cursor.fetchall()
+
+    player_stats = {}
+    for match in matches:
+        my_team = [p.strip() for p in match['my_team'].split(',') if p.strip()]
+        opp_team = [p.strip() for p in match['opponent_team'].split(',') if p.strip()]
+
+        for p in my_team + opp_team:
+            if p not in player_stats:
+                player_stats[p] = {'wins': 0, 'losses': 0}
+
+        if match['winner'] == 'me':
+            for p in my_team:
+                player_stats[p]['wins'] += 1
+            for p in opp_team:
+                player_stats[p]['losses'] += 1
+        else:
+            for p in opp_team:
+                player_stats[p]['wins'] += 1
+            for p in my_team:
+                player_stats[p]['losses'] += 1
+
+    # 构建排名列表
+    rankings = []
+    for row in ratings:
+        p = row['player_name']
+        stats = player_stats.get(p, {'wins': 0, 'losses': 0})
+        total = stats['wins'] + stats['losses']
+        win_rate = round(stats['wins'] / total * 100, 1) if total > 0 else 0.0
+        rankings.append({
+            'rank': 0,
+            'player_name': p,
+            'elo_rating': row['elo_rating'],
+            'wins': stats['wins'],
+            'losses': stats['losses'],
+            'win_rate': win_rate,
+            'games_played': row['games_played']
+        })
+
+    # 排序：ELO降序 > 场次降序 > 名字字母升序
+    rankings.sort(key=lambda x: (-x['elo_rating'], -x['games_played'], x['player_name']))
+
+    # 添加排名
+    for i, r in enumerate(rankings, 1):
+        r['rank'] = i
+
+    conn.close()
+    return rankings
+
 def get_db():
     """获取数据库连接"""
     conn = sqlite3.connect(DATABASE)
@@ -121,6 +308,14 @@ def init_db():
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP
         )
     ''')
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS player_ratings (
+            player_name TEXT PRIMARY KEY,
+            elo_rating INTEGER DEFAULT 1500,
+            games_played INTEGER DEFAULT 0,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
 
     # 检查并添加 created_by 字段（向后兼容）
     cursor.execute("PRAGMA table_info(matches)")
@@ -132,6 +327,7 @@ def init_db():
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_matches_date ON matches(date)')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_matches_my_team ON matches(my_team)')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_matches_opponent_team ON matches(opponent_team)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_ratings_elo ON player_ratings(elo_rating DESC)')
 
     conn.commit()
     conn.close()
@@ -653,13 +849,18 @@ def add_match():
     conn.commit()
 
     match_id = cursor.lastrowid
+
+    # 更新ELO评分
+    my_won = winner == 'me'
+    elo_changes = update_ratings_after_match(my_team_resolved, opp_team_resolved, my_won, conn)
+
     cursor.execute('SELECT * FROM matches WHERE id = ?', (match_id,))
     match = dict(cursor.fetchone())
     match['scores'] = json.loads(match['scores'])
     conn.close()
 
-    logger.info(f"Match added: id={match_id}, {parsed['my_team']} vs {parsed['opponent_team']}")
-    return jsonify(match), 201
+    logger.info(f"Match added: id={match_id}, {parsed['my_team']} vs {parsed['opponent_team']}, ELO: {elo_changes}")
+    return jsonify({**match, 'elo_changes': elo_changes}), 201
 
 @app.route('/api/matches/<int:match_id>', methods=['DELETE'])
 @require_auth
@@ -689,7 +890,9 @@ def delete_match(match_id):
     conn.close()
 
     if deleted:
-        return jsonify({'success': True})
+        # 重新计算所有ELO
+        recalculate_all_ratings()
+        return jsonify({'success': True, 'ratings_updated': True})
     else:
         return jsonify({'error': '记录不存在'}), 404
 
@@ -719,6 +922,8 @@ def update_match(match_id):
         return jsonify({'error': '无权限编辑比分'}), 403
 
     new_scores = data.get('scores')
+    old_winner = existing['winner']
+
     if new_scores:
         winner = determine_winner(new_scores)
         cursor.execute('''
@@ -730,13 +935,18 @@ def update_match(match_id):
 
     conn.commit()
 
+    # 如果胜负结果改变，重新计算所有ELO
+    winner_changed = winner != old_winner
+    if winner_changed:
+        recalculate_all_ratings()
+
     cursor.execute('SELECT * FROM matches WHERE id = ?', (match_id,))
     match = dict(cursor.fetchone())
     match['scores'] = json.loads(match['scores'])
     conn.close()
 
-    logger.info(f"Match updated: id={match_id}, new_scores={new_scores}")
-    return jsonify(match)
+    logger.info(f"Match updated: id={match_id}, new_scores={new_scores}, winner_changed={winner_changed}")
+    return jsonify({**match, 'ratings_updated': winner_changed})
 
 @app.route('/api/aliases', methods=['GET'])
 def get_aliases():
@@ -918,6 +1128,19 @@ def get_player_stats(player_name):
     result['opponents'].sort(key=lambda x: x['games'], reverse=True)
 
     return jsonify(result)
+
+@app.route('/api/rankings', methods=['GET'])
+def get_rankings_endpoint():
+    """获取玩家排名列表"""
+    limit = request.args.get('limit', None, type=int)
+    rankings = get_rankings()
+    if limit:
+        rankings = rankings[:limit]
+    return jsonify({
+        'rankings': rankings,
+        'total_players': len(rankings),
+        'default_elo': DEFAULT_ELO
+    })
 
 @app.route('/api/players', methods=['GET'])
 def get_all_players():
