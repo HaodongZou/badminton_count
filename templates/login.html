@@ -1,0 +1,369 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>登录 - 羽毛球比分记录</title>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/login.css') }}">
+</head>
+<body>
+    <!-- Background Elements -->
+    <div class="bg-pattern">
+        <div class="orb orb-1"></div>
+        <div class="orb orb-2"></div>
+        <div class="racket racket-1"></div>
+        <div class="racket racket-2"></div>
+        <div class="shuttlecock shuttlecock-1"></div>
+        <div class="shuttlecock shuttlecock-2"></div>
+    </div>
+
+    <!-- Login Card -->
+    <div class="login-container">
+        <div class="login-card" id="loginCard">
+            <!-- Logo -->
+            <div class="logo">
+                <div class="logo-icon">
+                    <svg class="shuttlecock-icon" viewBox="0 0 80 80" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <!-- Shuttlecock head -->
+                        <ellipse cx="40" cy="20" rx="18" ry="16" fill="#FF6B35"/>
+                        <ellipse cx="40" cy="20" rx="12" ry="10" fill="#FF8C5A"/>
+                        <ellipse cx="36" cy="16" rx="4" ry="3" fill="rgba(255,255,255,0.3)"/>
+                        <!-- Feathers -->
+                        <path d="M22 28C22 28 20 55 24 70C26 62 30 48 40 40C30 48 28 62 30 70C32 62 36 50 40 45C44 50 48 62 50 70C52 62 54 48 56 40C66 48 64 62 66 70C70 55 68 28 68 28" fill="#1B4332"/>
+                        <path d="M28 32C28 32 27 50 30 62C33 54 37 44 40 40C37 44 35 54 36 62C38 54 41 46 40 40C39 46 38 54 36 62C33 54 29 50 28 32" fill="#2D6A4F"/>
+                        <path d="M52 32C52 32 53 50 50 62C47 54 43 44 40 40C43 44 45 54 44 62C42 54 39 46 40 40C41 46 42 54 44 62C47 54 51 50 52 32" fill="#2D6A4F"/>
+                        <!-- Stem -->
+                        <line x1="40" y1="36" x2="40" y2="72" stroke="#4A7A44" stroke-width="3" stroke-linecap="round"/>
+                        <circle cx="40" cy="74" r="3" fill="#2D6A4F"/>
+                    </svg>
+                </div>
+                <h1>羽毛球比分</h1>
+                <p>记录每一场精彩对决</p>
+            </div>
+
+            <!-- Error Message -->
+            <div class="error-message" id="errorMessage"></div>
+
+            <!-- Login Form -->
+            <form class="login-form" id="loginForm" onsubmit="handleLogin(event)">
+                <div class="form-group">
+                    <label>用户名</label>
+                    <div class="input-wrapper">
+                        <input
+                            type="text"
+                            id="username"
+                            placeholder="请输入用户名"
+                            autocomplete="username"
+                            required
+                        >
+                        <svg class="input-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
+                            <circle cx="12" cy="7" r="4"/>
+                        </svg>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label>密码</label>
+                    <div class="input-wrapper">
+                        <input
+                            type="password"
+                            id="password"
+                            placeholder="请输入密码"
+                            autocomplete="current-password"
+                            required
+                        >
+                        <svg class="input-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+                            <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+                        </svg>
+                    </div>
+                </div>
+
+                <div class="remember-row">
+                    <label class="toggle-wrapper">
+                        <input type="checkbox" class="toggle-input" id="rememberMe">
+                        <span class="toggle"></span>
+                        <span class="toggle-label">记住我</span>
+                    </label>
+                </div>
+
+                <button type="submit" class="submit-btn" id="submitBtn">
+                    登录
+                </button>
+            </form>
+
+            <!-- Register Link -->
+            <div class="register-link">
+                <a href="#" onclick="showRegisterModal(event)">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+                        <circle cx="8.5" cy="7" r="4"/>
+                        <line x1="20" y1="8" x2="20" y2="14"/>
+                        <line x1="23" y1="11" x2="17" y2="11"/>
+                    </svg>
+                    注册账号
+                </a>
+            </div>
+
+            <!-- Skip Link -->
+            <div class="skip-link">
+                <a href="#" onclick="handleSkipLogin(event)">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M5 12h14M12 5l7 7-7 7"/>
+                    </svg>
+                    跳过登录
+                </a>
+            </div>
+        </div>
+
+        <!-- Register Modal -->
+        <div class="modal-overlay" id="registerModal">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h2>注册账号</h2>
+                    <button class="modal-close" onclick="closeRegisterModal()">&times;</button>
+                </div>
+                <form class="register-form" id="registerForm" onsubmit="handleRegister(event)">
+                    <div class="form-group">
+                        <label>用户名</label>
+                        <div class="input-wrapper">
+                            <input
+                                type="text"
+                                id="regUsername"
+                                placeholder="2-20个字符"
+                                autocomplete="username"
+                                required
+                                minlength="2"
+                                maxlength="20"
+                            >
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label>密码</label>
+                        <div class="input-wrapper">
+                            <input
+                                type="password"
+                                id="regPassword"
+                                placeholder="至少6个字符"
+                                autocomplete="new-password"
+                                required
+                                minlength="6"
+                            >
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label>确认密码</label>
+                        <div class="input-wrapper">
+                            <input
+                                type="password"
+                                id="regConfirmPassword"
+                                placeholder="再次输入密码"
+                                autocomplete="new-password"
+                                required
+                                minlength="6"
+                            >
+                        </div>
+                    </div>
+                    <div class="error-message" id="registerErrorMessage"></div>
+                    <button type="submit" class="submit-btn" id="registerBtn">
+                        注册
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = '';
+        const SESSION_KEY = ' badminton_session';
+        const USER_KEY = 'badminton_user';
+
+        // Check if already logged in on page load
+        document.addEventListener('DOMContentLoaded', () => {
+            const savedSession = localStorage.getItem(SESSION_KEY) || sessionStorage.getItem(SESSION_KEY);
+            if (savedSession) {
+                validateSession(savedSession);
+            }
+        });
+
+        async function validateSession(token) {
+            try {
+                const response = await fetch(`${API_BASE}/api/me`, {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+                if (response.ok) {
+                    window.location.href = '/';
+                } else {
+                    clearSession();
+                }
+            } catch (e) {
+                clearSession();
+            }
+        }
+
+        async function handleLogin(event) {
+            event.preventDefault();
+            const username = document.getElementById('username').value.trim();
+            const password = document.getElementById('password').value;
+            const remember = document.getElementById('rememberMe').checked;
+            const submitBtn = document.getElementById('submitBtn');
+            const errorMessage = document.getElementById('errorMessage');
+            const loginCard = document.getElementById('loginCard');
+
+            if (!username || !password) {
+                showError('请输入用户名和密码');
+                return;
+            }
+
+            submitBtn.classList.add('loading');
+            submitBtn.textContent = '登录中...';
+            errorMessage.classList.remove('show');
+            loginCard.classList.remove('error');
+
+            try {
+                const response = await fetch(`${API_BASE}/api/login`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username, password })
+                });
+
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.error || '登录失败');
+                }
+
+                // Save session
+                if (remember) {
+                    localStorage.setItem(SESSION_KEY, data.token);
+                    localStorage.setItem(USER_KEY, username);
+                } else {
+                    sessionStorage.setItem(SESSION_KEY, data.token);
+                    sessionStorage.setItem(USER_KEY, username);
+                }
+
+                window.location.href = '/';
+
+            } catch (error) {
+                showError(error.message);
+                loginCard.classList.add('error');
+                setTimeout(() => loginCard.classList.remove('error'), 500);
+            } finally {
+                submitBtn.classList.remove('loading');
+                submitBtn.textContent = '登录';
+            }
+        }
+
+        function handleSkipLogin(event) {
+            event.preventDefault();
+            // 访客token格式：guest_{timestamp}
+            const guestToken = 'guest_' + Date.now();
+            sessionStorage.setItem(SESSION_KEY, guestToken);
+            sessionStorage.setItem(USER_KEY, '访客');
+            window.location.href = '/';
+        }
+
+        function showError(message) {
+            const errorMessage = document.getElementById('errorMessage');
+            errorMessage.textContent = message;
+            errorMessage.classList.add('show');
+        }
+
+        function showRegisterModal(event) {
+            if (event) event.preventDefault();
+            document.getElementById('registerModal').classList.add('show');
+            document.getElementById('registerErrorMessage').classList.remove('show');
+        }
+
+        function closeRegisterModal() {
+            document.getElementById('registerModal').classList.remove('show');
+            document.getElementById('registerForm').reset();
+            document.getElementById('registerErrorMessage').classList.remove('show');
+        }
+
+        async function handleRegister(event) {
+            event.preventDefault();
+            const username = document.getElementById('regUsername').value.trim();
+            const password = document.getElementById('regPassword').value;
+            const confirmPassword = document.getElementById('regConfirmPassword').value;
+            const registerBtn = document.getElementById('registerBtn');
+            const errorMessage = document.getElementById('registerErrorMessage');
+
+            if (!username || !password) {
+                showRegisterError('请填写所有字段');
+                return;
+            }
+
+            if (password !== confirmPassword) {
+                showRegisterError('两次密码输入不一致');
+                return;
+            }
+
+            if (password.length < 6) {
+                showRegisterError('密码长度至少6个字符');
+                return;
+            }
+
+            registerBtn.classList.add('loading');
+            registerBtn.textContent = '注册中...';
+            errorMessage.classList.remove('show');
+
+            try {
+                const response = await fetch(`${API_BASE}/api/register`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username, password, confirm_password: confirmPassword })
+                });
+
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.error || '注册失败');
+                }
+
+                // 注册成功，提示并关闭
+                showToast('注册成功！请登录');
+                closeRegisterModal();
+
+                // 自动填充登录表单
+                document.getElementById('username').value = username;
+                document.getElementById('password').focus();
+
+            } catch (error) {
+                showRegisterError(error.message);
+            } finally {
+                registerBtn.classList.remove('loading');
+                registerBtn.textContent = '注册';
+            }
+        }
+
+        function showRegisterError(message) {
+            const errorMessage = document.getElementById('registerErrorMessage');
+            errorMessage.textContent = message;
+            errorMessage.classList.add('show');
+        }
+
+        function showToast(message) {
+            // 简单的 toast 实现
+            const toast = document.createElement('div');
+            toast.className = 'toast show';
+            toast.textContent = message;
+            toast.style.cssText = 'position:fixed;top:20px;left:50%;transform:translateX(-50%);background:#333;color:#fff;padding:12px 24px;border-radius:8px;z-index:2000;';
+            document.body.appendChild(toast);
+            setTimeout(() => {
+                toast.classList.remove('show');
+                setTimeout(() => toast.remove(), 300);
+            }, 3000);
+        }
+
+        function clearSession() {
+            localStorage.removeItem(SESSION_KEY);
+            localStorage.removeItem(USER_KEY);
+            sessionStorage.removeItem(SESSION_KEY);
+            sessionStorage.removeItem(USER_KEY);
+        }
+    </script>
+</body>
+</html>

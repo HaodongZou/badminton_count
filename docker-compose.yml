@@ -1,0 +1,9 @@
+version: '3'
+services:
+  badminton:
+    image: badminton-count:latest
+    ports:
+      - "48020:5000"
+    volumes:
+      - /tmp/zfsv3/nvme12/13263199088/data/Docker/badminton/data:/app/data
+    restart: unless-stopped

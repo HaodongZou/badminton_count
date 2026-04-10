@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>羽毛球比分记录</title>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;700&family=Roboto+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <nav>
+        <div class="nav-content">
+            <div class="logo">
+                <div class="logo-icon">🏸</div>
+                <span>羽毛球比分记录</span>
+            </div>
+            <div class="nav-actions">
+                <button class="nav-logout-btn" onclick="logout()" title="退出登录">
+                    <span>🚪</span>
+                    <span>退出</span>
+                </button>
+            </div>
+        </div>
+    </nav>
+
+    <main>
+        <!-- Tabs -->
+        <div class="tabs">
+            <button class="tab active" data-tab="input">
+                <span class="tab-icon">✏️</span>
+                <span>记分板</span>
+            </button>
+            <button class="tab" data-tab="records">
+                <span class="tab-icon">📋</span>
+                <span>比赛记录</span>
+            </button>
+            <button class="tab" data-tab="stats">
+                <span class="tab-icon">📊</span>
+                <span>胜率统计</span>
+            </button>
+            <button class="tab" data-tab="arrange">
+                <span class="tab-icon">🔄</span>
+                <span>双打排列</span>
+            </button>
+        </div>
+
+        <!-- Input Tab -->
+        <div class="tab-content active" id="input">
+            <div class="input-section">
+                <div class="input-header">
+                    <h2>记录新比赛</h2>
+                    <p>选择预设或输入比赛信息</p>
+                </div>
+
+                <!-- Main Input -->
+                <div class="input-wrapper">
+                    <textarea id="matchInput" placeholder="例如：我和队友A打队友B和队友C，第一局21:15，第二局21:18"></textarea>
+                </div>
+
+                <button class="preview-btn" onclick="previewMatch()">
+                    <span>🔍</span>
+                    <span>解析并预览</span>
+                </button>
+
+                <!-- Preview Section -->
+                <div class="preview-section" id="previewSection" style="display: none;">
+                    <div class="preview-header">
+                        <h4>📋 解析结果预览</h4>
+                        <p>请确认以下信息是否正确：</p>
+                    </div>
+                    <div class="preview-content" id="previewContent"></div>
+                    <div class="preview-actions">
+                        <button class="preview-btn secondary" onclick="hidePreview()">重新输入</button>
+                        <button class="preview-btn confirm" onclick="confirmSave()">
+                            <span>✅</span>
+                            <span>确认保存</span>
+                        </button>
+                    </div>
+                </div>
+
+                <div class="example">
+                    <div class="example-label">💡 输入示例：</div>
+                    <div class="example-text">我和队友A打队友B和队友C，第一局21:15，第二局21:18</div>
+                    <div class="example-text">我打对手A，第一局21:18，第二局15:21</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Records Tab -->
+        <div class="tab-content" id="records">
+            <div class="section-header">
+                <h3 class="section-title">比赛记录</h3>
+            </div>
+            <!-- 筛选器 -->
+            <div class="records-filter">
+                <span class="filter-label">筛选：</span>
+                <button class="filter-btn active" data-filter="all" onclick="setMatchFilter('all')">全部</button>
+                <button class="filter-btn" data-filter="admin" onclick="setMatchFilter('admin')">管理员</button>
+                <button class="filter-btn" data-filter="mine" onclick="setMatchFilter('mine')">我的</button>
+            </div>
+            <div id="recordsContainer">
+                <div class="loading"><div class="spinner"></div></div>
+            </div>
+        </div>
+
+        <!-- Stats Tab -->
+        <div class="tab-content" id="stats">
+            <div class="stats-overview" id="statsOverview">
+                <div class="stats-player-selector" id="playerSelector"></div>
+
+                <!-- Time Filter -->
+                <div class="time-filter">
+                    <button class="time-btn" data-period="today" onclick="setTimePeriod('today')">当天</button>
+                    <button class="time-btn" data-period="week" onclick="setTimePeriod('week')">本周</button>
+                    <button class="time-btn" data-period="month" onclick="setTimePeriod('month')">当月</button>
+                    <button class="time-btn active" data-period="all" onclick="setTimePeriod('all')">全部</button>
+                </div>
+
+                <!-- Opponent Filter -->
+                <div class="opponent-filter">
+                    <select id="opponentFilter" onchange="setOpponentFilter()">
+                        <option value="">所有对手</option>
+                    </select>
+                </div>
+
+                <div class="stats-main">
+                    <div class="stat-item wins">
+                        <div class="stat-value" id="totalGamesWon">0</div>
+                        <div class="stat-label">赢局</div>
+                    </div>
+                    <div class="stat-item losses">
+                        <div class="stat-value" id="totalGamesLost">0</div>
+                        <div class="stat-label">输局</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-value" id="totalWinRate">0%</div>
+                        <div class="stat-label">胜率</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Alias Management - Collapsible -->
+            <div class="alias-section">
+                <div class="alias-header">
+                    <button class="alias-toggle-btn" onclick="toggleAliases()">
+                        <span id="aliasToggleIcon">▶</span>
+                        <span id="aliasSectionTitle">选手别名</span>
+                    </button>
+                </div>
+                <div class="alias-content" id="aliasContent" style="display: none;">
+                    <div id="aliasesContainer"></div>
+                </div>
+            </div>
+
+            <div class="opponents-section">
+                <h4 class="opponents-title">对阵详情</h4>
+                <div id="opponentsContainer">
+                    <div class="loading"><div class="spinner"></div></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Arrange Tab -->
+        <div class="tab-content" id="arrange">
+            <div class="arrange-section">
+                <div class="arrange-header">
+                    <h2>双打排列生成器</h2>
+                    <p>输入参与人员，自动生成公平的双打配对</p>
+                </div>
+
+                <!-- Player Input -->
+                <div class="arrange-input-wrapper">
+                    <textarea id="arrangePlayersInput" placeholder="输入选手名字，用逗号、空格或换行分隔&#10;例如：选手A、选手B、选手C、选手D"></textarea>
+                </div>
+
+                <div class="arrange-options">
+                    <div class="option-row">
+                        <label>比赛数量：</label>
+                        <input type="number" id="numMatches" min="1" max="50" value="10" style="width: 60px; padding: 8px; border: 2px solid #E5E5E0; border-radius: 6px; font-size: 1rem; text-align: center;">
+                        <span>场（每场约15分钟）</span>
+                    </div>
+                </div>
+
+                <button class="preview-btn" onclick="generateArrangement()">
+                    <span>🔄</span>
+                    <span>生成排列</span>
+                </button>
+
+                <!-- Arrangement Result -->
+                <div class="arrangement-result" id="arrangementResult" style="display: none;">
+                    <div class="arrangement-matches" id="arrangementMatches"></div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- Alias Modal -->
+    <div class="modal" id="aliasModal">
+        <div class="modal-content">
+            <h3 class="modal-title">添加选手别名</h3>
+            <p class="modal-hint" id="aliasHint">将其他名字合并到当前选手</p>
+            <div class="modal-form">
+                <div class="form-group">
+                    <label>别名（被合并的名字）</label>
+                    <input type="text" id="aliasInput" placeholder="例如：队友A">
+                </div>
+                <div class="form-group">
+                    <label>合并到（当前选手）</label>
+                    <div class="canonical-name" id="canonicalDisplay"></div>
+                </div>
+            </div>
+            <div class="modal-actions">
+                <button class="modal-btn cancel" onclick="closeAliasModal()">取消</button>
+                <button class="modal-btn confirm" onclick="addAlias()">确认添加</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Edit Match Modal -->
+    <div class="modal" id="editMatchModal">
+        <div class="modal-content">
+            <h3 class="modal-title">修改比分</h3>
+            <p class="modal-hint" id="editMatchHint"></p>
+            <div class="modal-form" id="editMatchForm">
+                <!-- Score inputs will be dynamically added here -->
+            </div>
+            <div class="modal-actions">
+                <button class="modal-btn cancel" onclick="closeEditMatchModal()">取消</button>
+                <button class="modal-btn confirm" onclick="saveEditMatch()">保存</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="toast" id="toast"></div>
+
+    <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+</body>
+</html>
