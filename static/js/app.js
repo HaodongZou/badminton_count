@@ -326,8 +326,12 @@ function renderRecordCard(match) {
     const creatorLabel = isCreatedByAdmin ? '管理员' : match.created_by;
     const creatorClass = isCreatedByAdmin ? 'creator-admin' : 'creator-user';
 
-    // 删除按钮权限
+    // 编辑和删除按钮权限
+    const canEdit = isAdminUser || (currentUser === match.created_by && !isGuest);
     const canDelete = isAdminUser || (currentUser === match.created_by && !isGuest);
+    const editBtn = canEdit
+        ? `<button class="record-action-btn edit" onclick="editMatch(${match.id})" title="编辑">✏️</button>`
+        : '';
     const deleteBtn = canDelete
         ? `<button class="record-action-btn delete" onclick="deleteMatch(${match.id})" title="删除">🗑️</button>`
         : '';
@@ -360,6 +364,7 @@ function renderRecordCard(match) {
                 ${resultText}
             </div>
             <div class="record-actions">
+                ${editBtn}
                 ${deleteBtn}
             </div>
         </div>
