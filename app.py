@@ -200,8 +200,8 @@ def recalculate_all_ratings():
     # 按时间顺序重放所有比赛（逐局更新ELO）
     cursor.execute('SELECT * FROM matches ORDER BY date ASC')
     for match in cursor.fetchall():
-        my_team = [p.strip() for p in match['my_team'].split(',') if p.strip()]
-        opp_team = [p.strip() for p in match['opponent_team'].split(',') if p.strip()]
+        my_team = resolve_team([p.strip() for p in match['my_team'].split(',') if p.strip()])
+        opp_team = resolve_team([p.strip() for p in match['opponent_team'].split(',') if p.strip()])
         scores = json.loads(match['scores']) if match['scores'] else []
 
         for p in my_team + opp_team:
@@ -231,8 +231,8 @@ def get_rankings():
 
     player_stats = {}
     for match in matches:
-        my_team = [p.strip() for p in match['my_team'].split(',') if p.strip()]
-        opp_team = [p.strip() for p in match['opponent_team'].split(',') if p.strip()]
+        my_team = resolve_team([p.strip() for p in match['my_team'].split(',') if p.strip()])
+        opp_team = resolve_team([p.strip() for p in match['opponent_team'].split(',') if p.strip()])
         scores = json.loads(match['scores']) if match['scores'] else []
 
         for p in my_team + opp_team:
@@ -1270,8 +1270,9 @@ def add_alias():
     conn.commit()
     conn.close()
 
-    # 清除别名缓存
+    # 清除别名缓存并重新计算所有ELO
     clear_alias_cache()
+    recalculate_all_ratings()
 
     return jsonify({'success': True, 'alias': alias, 'canonical_name': canonical_name}), 201
 
@@ -1286,9 +1287,10 @@ def delete_alias(alias_id):
     deleted = cursor.rowcount > 0
     conn.close()
 
-    # 清除别名缓存
+    # 清除别名缓存并重新计算所有ELO
     if deleted:
         clear_alias_cache()
+        recalculate_all_ratings()
 
     if deleted:
         return jsonify({'success': True})
