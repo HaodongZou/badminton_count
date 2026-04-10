@@ -952,9 +952,9 @@ def update_match(match_id):
 
     conn.commit()
 
-    # 如果胜负结果改变，重新计算所有ELO
+    # 如果比分或胜负结果改变，重新计算所有ELO
     winner_changed = winner != old_winner
-    if winner_changed:
+    if winner_changed or new_scores:
         recalculate_all_ratings()
 
     cursor.execute('SELECT * FROM matches WHERE id = ?', (match_id,))
