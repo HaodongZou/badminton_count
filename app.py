@@ -418,24 +418,25 @@ def _parse_win_loss_pattern(text):
     """
     检测并解析胜负模式，返回 (我的胜局数, 我的负局数) 或 None
     支持格式:
-      - "1:1", "2:0", "0:2", "2:1" (半角冒号)
-      - "1：1", "2：0" (全角冒号)
+      - "1:1", "2:0", "0:2", "2:1" (半角/全角冒号)
       - "一比一", "二比零", "二比一"
       - "一胜一负", "两胜", "一负", "三胜"
+      - "赢一输一", "输一赢一"
+      - "两局都赢了", "两局都输了"
+      - "都赢了", "都输了"
       - "第一局赢了", "第二局输了"
-      - "赢了输了" (没有局数标记，默认两局)
+      - "赢了输了" (没有局数标记)
+      - "平局" (1胜1负)
     """
     text_no_space = re.sub(r'\s+', '', text)
 
-    # 格式1: X:Y 或 X比Y (X和Y是数字)
-    # 半角冒号: 1:1, 2:0
+    # 格式1: X:Y 或 X比Y (X和Y是数字，且<10才视为胜负)
     m = re.search(r'(\d+)[:：](\d+)', text_no_space)
     if m:
         wins = int(m.group(1))
         losses = int(m.group(2))
         # 排除明显的真实比分（如 21:15, 11:0 等）
         if wins >= 10 or losses >= 10:
-            # 可能是真实比分，跳过
             pass
         else:
             return wins, losses
@@ -447,12 +448,7 @@ def _parse_win_loss_pattern(text):
         losses = _parse_chinese_number(m.group(2))
         return wins, losses
 
-    # 格式3: 一胜一负、两胜、一负、三胜
-    win_texts = ['胜', '赢']
-    loss_texts = ['负', '输']
-    wins, losses = 0, 0
-
-    # 匹配 N胜N负 格式
+    # 格式3a: 一胜一负 (number first)
     m = re.search(r'([零一二三四五六七八九十两]+)[胜赢]([零一二三四五六七八九十两]+)?[负输]?', text_no_space)
     if m:
         wins = _parse_chinese_number(m.group(1))
@@ -460,7 +456,29 @@ def _parse_win_loss_pattern(text):
             losses = _parse_chinese_number(m.group(2))
         return wins, losses
 
-    # 匹配单独的 N胜 或 N负
+    # 格式3b: 赢一输一、输一赢一 (win/loss first, like "win one lose one")
+    m = re.search(r'(赢|输|胜|负)([零一二三四五六七八九十两]+)(?:(赢|输|胜|负)([零一二三四五六七八九十两]+))?', text_no_space)
+    if m:
+        first_outcome = m.group(1)
+        first_num = _parse_chinese_number(m.group(2))
+        if first_outcome in ['赢', '胜']:
+            wins = first_num
+        else:
+            wins = 0
+        if first_outcome in ['输', '负']:
+            losses = first_num
+        else:
+            losses = 0
+        if m.group(3):
+            second_outcome = m.group(3)
+            second_num = _parse_chinese_number(m.group(4))
+            if second_outcome in ['赢', '胜']:
+                wins += second_num
+            else:
+                losses += second_num
+        return wins, losses
+
+    # 格式4: 单独的 N胜 或 N负
     m = re.search(r'([零一二三四五六七八九十两]+)[胜赢](?![负输])', text_no_space)
     if m:
         wins = _parse_chinese_number(m.group(1))
@@ -471,33 +489,65 @@ def _parse_win_loss_pattern(text):
         losses = _parse_chinese_number(m.group(1))
         return 0, losses
 
-    # 格式4: 第一局赢了/输了、第二局赢了/输了
+    # 格式5: 两局都赢了、两局都输了、都赢了、都输了
+    if '两局都赢了' in text_no_space or '都赢了' in text_no_space:
+        return 2, 0
+    if '两局都输了' in text_no_space or '都输了' in text_no_space:
+        return 0, 2
+
+    # 格式6: 平局
+    if '平局' in text_no_space or '平' == text_no_space[-1] if text_no_space else False:
+        return 1, 1
+
+    # 格式7: 第一局赢了/输了、第二局赢了/输了
     ju_win_losses = []
     ju_pattern = r'第([零一二三四五六七八九十两\d]+)局[赢了输]'
     for m in re.finditer(ju_pattern, text_no_space):
-        ju_num = _parse_chinese_number(m.group(1))
-        outcome = m.group(0)[-1]  # 取最后一个字
-        ju_win_losses.append((ju_num, outcome))
+        outcome = m.group(0)[-1]
+        ju_win_losses.append(outcome)
 
     if ju_win_losses:
-        wins = sum(1 for _, o in ju_win_losses if o in ['赢', '胜'])
-        losses = sum(1 for _, o in ju_win_losses if o in ['输', '负'])
+        wins = sum(1 for o in ju_win_losses if o in ['赢', '胜'])
+        losses = sum(1 for o in ju_win_losses if o in ['输', '负'])
         return wins, losses
 
-    # 格式5: 赢了输了 (无局数标记，默认两局)
+    # 格式8: 赢了输了 (无局数标记)
     if '赢了' in text_no_space and '输了' in text_no_space:
-        # 计算赢和输的次数
         win_count = len(re.findall(r'赢了', text_no_space))
         loss_count = len(re.findall(r'输了', text_no_space))
         return win_count, loss_count
 
-    # 格式6: 只有赢了 或 只有输了 (单局)
+    # 格式9: 只有赢了 或 只有输了 (单局)
     if '赢了' in text_no_space and '输了' not in text_no_space:
         return 1, 0
     if '输了' in text_no_space and '赢了' not in text_no_space:
         return 0, 1
 
     return None
+
+
+def _parse_ju_results(text):
+    """
+    提取每局的胜负结果，返回 [(outcome), ...] 列表
+    用于补充真实比分，比如"第一局21:15，第二局赢了"
+    outcome: 'win' 或 'loss'
+    """
+    text_no_space = re.sub(r'\s+', '', text)
+    results = []
+
+    # 匹配第X局赢了/输了（赢了/输了可能有两个字）
+    ju_pattern = r'第([零一二三四五六七八九十两\d]+)局[赢了输][了]*'
+    for m in re.finditer(ju_pattern, text_no_space):
+        outcome = m.group(0)[-1]
+        results.append('win' if outcome in ['赢', '胜'] else 'loss')
+
+    # 两局都赢了/输了
+    if '两局都赢了' in text_no_space or '都赢了' in text_no_space:
+        results = ['win', 'win']
+    elif '两局都输了' in text_no_space or '都输了' in text_no_space:
+        results = ['loss', 'loss']
+
+    return results
 
 def _generate_scores_from_wins_losses(wins, losses):
     """根据胜负局数生成虚拟比分"""
@@ -558,28 +608,53 @@ def parse_match_input(text):
     text = re.sub(r'\s+', '', text)
 
     # ========== 1. 先检测胜负模式 (在没有真实比分的情况下) ==========
-    score_pattern = r'(\d{1,2}):(\d{1,2})'
+    score_pattern = r'(\d{1,2})[:：](\d{1,2})'
 
-    # 检查是否有真实比分（如 21:15, 11:0 等，大于10的比分）
-    has_real_scores = bool(re.search(r'\d{2,}:\d{2,}', text))
+    # 检查是否有真实比分（如 21:15, 11:0, 21：12 等，大于10的比分）
+    has_real_scores = bool(re.search(r'\d{2,}[:：]\d{2,}', text))
 
     # 如果没有真实比分，尝试解析胜负模式
     if not has_real_scores:
-        win_loss = _parse_win_loss_pattern(text)
-        if win_loss:
-            wins, losses = win_loss
-            result['scores'] = _generate_scores_from_wins_losses(wins, losses)
+        # 特殊处理：平局 (draw) - 生成 [[21, 21]]
+        if '平局' in text:
+            result['scores'] = [[21, 21]]
+        else:
+            win_loss = _parse_win_loss_pattern(text)
+            if win_loss:
+                wins, losses = win_loss
+                result['scores'] = _generate_scores_from_wins_losses(wins, losses)
+    else:
+        # 有真实比分时，也要提取每局的胜负描述来补充
+        extra_win_loss = _parse_win_loss_pattern(text)
+        # 提取每局胜负标记（第一局赢了等）
+        ju_results = _parse_ju_results(text)
+        # 真实比分由下面单独提取
+        result['scores'] = []
 
     # ========== 2. 提取比分 (真实比分) ==========
-    # 只有在有真实比分的情况下才解析
+    # 匹配半角和全角冒号的比分
     if has_real_scores:
         score_matches = list(re.finditer(score_pattern, text))
         if score_matches:
             result['scores'] = [[int(m.group(1)), int(m.group(2))] for m in score_matches]
 
+        # 补充：提取每局胜负标记（如"第二局赢了"）来补全比分
+        ju_results = _parse_ju_results(text)
+        if ju_results:
+            # 真实比分有几局，每局胜负标记有几局
+            real_game_count = len(result['scores'])
+            ju_game_count = len(ju_results)
+            # 如果胜负标记比真实比分多，补全虚拟比分
+            if ju_game_count > real_game_count:
+                for i in range(real_game_count, ju_game_count):
+                    if ju_results[i] == 'win':
+                        result['scores'].append([21, 0])
+                    else:
+                        result['scores'].append([0, 21])
+
     # ========== 3. 移除比分和局数标记，得到纯选手文本 ==========
-    # 移除局数标记和胜负结果：第1局赢了、第2局输了 等
-    ju_pattern = r'第[一二三四五六七八九十零\d]+局[赢了输]*'
+    # 移除局数标记和胜负结果：第1局赢了、第2局输了、两局都赢了 等
+    ju_pattern = r'第[一二三四五六七八九十零\d]+局[赢了输]*|两局都[赢了输]+|都[赢了输]+|平局'
     players_text = re.sub(ju_pattern, '', text)  # 移除局数标记和胜负
     players_text = re.sub(score_pattern, '', players_text)  # 移除比分
     players_text = players_text.rstrip('，,。.')
@@ -594,13 +669,12 @@ def parse_match_input(text):
     after_da = players_text[da_pos + 1:].strip('，,。.')
 
     # 清理队伍文本中的胜负/比分残余文字
-    # 只移除真正表示胜负的文字（必须包含"胜/负/赢/输"或"比"或冒号）
-    # 格式: N胜M负(如一胜一负), N比M(如二比零), X:Y(如1:1), 赢了, 输了, 第一局赢了 等
-    # 数字集: 零一二三四五六七八九十两
+    # 格式: N胜M负(如一胜一负), N比M(如二比零), X:Y(如1:1), 两局都赢了, 都赢了, 平局, 赢一输一 等
     num_class = r'[\d零一二三四五六七八九十两]'
-    # 模式: N比M, X:Y, N胜M负, N胜, N负, 赢了, 输了
     win_loss_class = r'(?:胜|负|赢|输)'
-    trailing_pattern = rf'[，,。.\s]*(?:{num_class}+比{num_class}+|{num_class}+[:：]{num_class}+|(?:{num_class}+{win_loss_class}{{1,2}})+|{win_loss_class}+了?)[，,。.\s]*$'
+    # Both orders: number first (一胜一负) or win/loss first (赢一输一, 输一赢一)
+    wl_both_orders = rf'(?:(?:{num_class}+{win_loss_class}{{1,2}})+|(?:{win_loss_class}+{num_class}+)+)'
+    trailing_pattern = rf'[，,。.\s]*(?:两局都[赢了输]+|都[赢了输]+|平局|{num_class}+比{num_class}+|{num_class}+[:：]{num_class}+|{wl_both_orders}|{win_loss_class}+了?)[，,。.\s]*$'
     before_da = re.sub(trailing_pattern, '', before_da)
     after_da = re.sub(trailing_pattern, '', after_da)
 
