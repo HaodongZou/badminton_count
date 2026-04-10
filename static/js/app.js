@@ -726,6 +726,7 @@ async function addAlias() {
             loadAliases();
             loadPlayers();
             loadStats(currentPlayer);
+            loadRankings();
         } else {
             const data = await response.json();
             showToast(data.error || '添加失败', 'error');
@@ -750,6 +751,7 @@ async function deleteAlias(aliasId) {
             loadAliases();
             loadPlayers();
             loadStats(currentPlayer);
+            loadRankings();
         } else {
             showToast('删除失败', 'error');
         }
