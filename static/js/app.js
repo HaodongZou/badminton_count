@@ -794,7 +794,7 @@ async function loadRankings() {
                     <td class="rank-cell">
                         ${player.rank === 1 ? '🥇' : player.rank === 2 ? '🥈' : player.rank === 3 ? '🥉' : player.rank}
                     </td>
-                    <td class="player-cell">${escapeHtml(player.player_name)}</td>
+                    <td class="player-cell">${player.player_name}</td>
                     <td class="elo-cell">${player.elo_rating}</td>
                     <td class="wins-cell">${player.wins}</td>
                     <td class="losses-cell">${player.losses}</td>
