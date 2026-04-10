@@ -10,7 +10,7 @@ from functools import lru_cache, wraps
 import re
 import json
 
-from flask import Flask, render_template, request, jsonify, redirect
+from flask import Flask, render_template, request, jsonify, redirect, session
 from itsdangerous import URLSafeTimedSerializer as Serializer, SignatureExpired, BadSignature
 from werkzeug.security import generate_password_hash, check_password_hash
 
@@ -894,12 +894,16 @@ def api_login():
     # 优先检查管理员账号
     if username == LOGIN_USER and password == LOGIN_PASSWORD:
         token = generate_token(username, is_admin=True)
+        session['user'] = username
+        session['is_admin'] = True
         logger.info(f"Admin {username} logged in successfully")
         return jsonify({'token': token, 'user': username, 'is_admin': True})
 
     # 检查注册用户
     if verify_user_password(username, password):
         token = generate_token(username, is_admin=False)
+        session['user'] = username
+        session['is_admin'] = False
         logger.info(f"User {username} logged in successfully")
         return jsonify({'token': token, 'user': username, 'is_admin': False})
 
@@ -971,6 +975,7 @@ def api_register():
 @app.route('/api/logout', methods=['POST'])
 def api_logout():
     """登出API"""
+    session.clear()
     return jsonify({'success': True})
 
 @app.route('/api/me', methods=['GET'])
@@ -996,7 +1001,9 @@ def api_me():
 
 @app.route('/')
 def index():
-    """返回主页"""
+    """返回主页（需登录）"""
+    if 'user' not in session:
+        return redirect('/login')
     return render_template('index.html')
 
 @app.route('/api/matches', methods=['GET'])
