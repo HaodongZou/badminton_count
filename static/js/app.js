@@ -6,7 +6,7 @@
 const API_BASE = '';
 
 // Auth keys
-const SESSION_KEY = ' badminton_session';
+const SESSION_KEY = 'badminton_session';
 const USER_KEY = 'badminton_user';
 
 // Current user state
@@ -90,6 +90,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (!isAuthenticated) return;
 
     initTabs();
+    loadPlayerFilterChips();
     loadRecords();
     loadPlayers();
     applyPermissions();
@@ -246,16 +247,36 @@ async function confirmSave() {
     }
 }
 
-// Load Records
+// Debounce utility
+function debounce(fn, delay) {
+    let timer;
+    return function(...args) {
+        clearTimeout(timer);
+        timer = setTimeout(() => fn.apply(this, args), delay);
+    };
+}
+
+// Update filter button active states
+function updateFilterButtons() {
+    document.querySelectorAll('.filter-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.filter === currentMatchFilter);
+    });
+}
+
+// Load Records (merged: supports both filter and players parameters)
 async function loadRecords() {
     const container = document.getElementById('recordsContainer');
 
     try {
-        const url = `${API_BASE}/api/matches?filter=${currentMatchFilter}`;
+        let url = `${API_BASE}/api/matches`;
+        const params = new URLSearchParams();
+        if (currentMatchFilter !== 'all') params.set('filter', currentMatchFilter);
+        if (selectedPlayersForFilter.length > 0) params.set('players', selectedPlayersForFilter.join(','));
+        if (params.toString()) url += '?' + params.toString();
         const response = await fetch(url, { headers: getAuthHeaders() });
-        const matches = await response.json();
+        const data = await response.json();
+        const matches = data.matches || [];
 
-        // 更新筛选按钮状态
         updateFilterButtons();
 
         if (matches.length === 0) {
@@ -285,15 +306,68 @@ async function loadRecords() {
     }
 }
 
-function updateFilterButtons() {
-    document.querySelectorAll('.filter-btn').forEach(btn => {
-        btn.classList.toggle('active', btn.dataset.filter === currentMatchFilter);
-    });
+// Debounced version for use in player filter (avoids rapid-fire API calls)
+const debouncedLoadRecords = debounce(loadRecords, 300);
+
+// State for multi-player filter in records tab
+let selectedPlayersForFilter = [];  // 多选球员筛选
+
+// Load player chips for filter
+async function loadPlayerFilterChips() {
+    const container = document.getElementById('playerFilterChips');
+    try {
+        const response = await fetch(`${API_BASE}/api/players`, { headers: getAuthHeaders() });
+        const players = await response.json();
+
+        container.innerHTML = players.map(player => `
+            <button class="player-chip filter-chip ${selectedPlayersForFilter.includes(player) ? 'active' : ''}"
+                    data-player="${player}"
+                    onclick="togglePlayerFilter('${player}')">
+                ${player}
+            </button>
+        `).join('');
+    } catch (error) {
+        console.error('Failed to load player chips:', error);
+    }
 }
 
-function setMatchFilter(filter) {
-    currentMatchFilter = filter;
-    loadRecords();
+function togglePlayerFilter(player) {
+    const idx = selectedPlayersForFilter.indexOf(player);
+    if (idx >= 0) {
+        selectedPlayersForFilter.splice(idx, 1);
+    } else {
+        selectedPlayersForFilter.push(player);
+    }
+    loadPlayerFilterChips();
+    debouncedLoadRecords();
+}
+
+function clearPlayerFilter() {
+    selectedPlayersForFilter = [];
+    loadPlayerFilterChips();
+    debouncedLoadRecords();
+}
+
+// Delete Match
+async function deleteMatch(matchId) {
+    if (!confirm('确定要删除这条记录吗？')) return;
+
+    try {
+        const response = await fetch(`${API_BASE}/api/matches/${matchId}`, {
+            method: 'DELETE',
+            headers: getAuthHeaders()
+        });
+
+        if (response.ok) {
+            showToast('记录已删除', 'success');
+            loadRecords();
+            loadPlayers();
+        } else {
+            showToast('删除失败', 'error');
+        }
+    } catch (error) {
+        showToast('删除失败', 'error');
+    }
 }
 
 // Render Record Card
@@ -369,28 +443,6 @@ function renderRecordCard(match) {
             </div>
         </div>
     `;
-}
-
-// Delete Match
-async function deleteMatch(matchId) {
-    if (!confirm('确定要删除这条记录吗？')) return;
-
-    try {
-        const response = await fetch(`${API_BASE}/api/matches/${matchId}`, {
-            method: 'DELETE',
-            headers: getAuthHeaders()
-        });
-
-        if (response.ok) {
-            showToast('记录已删除', 'success');
-            loadRecords();
-            loadPlayers();
-        } else {
-            showToast('删除失败', 'error');
-        }
-    } catch (error) {
-        showToast('删除失败', 'error');
-    }
 }
 
 // Edit Match - show modal
@@ -627,10 +679,27 @@ function updateOpponentDropdown(opponents) {
 }
 
 function filterByOpponent(opponentName) {
-    const select = document.getElementById('opponentFilter');
-    select.value = opponentName;
-    currentOpponentFilter = opponentName;
-    loadStats(currentPlayer);
+    // 1. 切换到 records tab
+    const recordsTab = document.querySelector('[data-tab="records"]');
+    if (recordsTab) {
+        recordsTab.click();
+    } else {
+        document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+        document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+        document.getElementById('records').classList.add('active');
+    }
+
+    // 2. 添加到球员筛选（如果当前玩家已选择的话追加，否则只选对手）
+    if (!selectedPlayersForFilter.includes(currentPlayer)) {
+        selectedPlayersForFilter = [currentPlayer];
+    }
+    if (!selectedPlayersForFilter.includes(opponentName)) {
+        selectedPlayersForFilter.push(opponentName);
+    }
+
+    // 3. 更新球员筛选UI并加载记录
+    loadPlayerFilterChips();
+    loadRecords();
 }
 
 // Toggle Aliases visibility
@@ -870,11 +939,78 @@ async function loadStats(playerName) {
             </div>
         `).join('');
 
+        // Load best partner
+        loadBestPartner(playerName);
+
     } catch (error) {
         container.innerHTML = `
             <div class="empty-state">
                 <div class="empty-title">加载失败</div>
                 <p>${error.message}</p>
+            </div>
+        `;
+    }
+}
+
+// Load Best Partner
+async function loadBestPartner(playerName) {
+    const container = document.getElementById('bestPartnerContainer');
+    if (!container) return;
+
+    // Helper to escape template strings
+    const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":"&#39;"}[c]));
+
+    try {
+        const url = `${API_BASE}/api/players/${encodeURIComponent(playerName)}/best-partner`;
+        const response = await fetch(url);
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+        const data = await response.json();
+        if (!data.best_partner) {
+            container.innerHTML = `
+                <div class="empty-state">
+                    <div class="empty-icon">🤝</div>
+                    <div class="empty-title">暂无搭档数据</div>
+                    <p>开始双打比赛来查看最佳搭档！</p>
+                </div>
+            `;
+            return;
+        }
+
+        const best = data.best_partner;
+        const allPartners = data.all_partners || [];
+
+        container.innerHTML = `
+            <div class="best-partner-card">
+                <div class="partner-main">
+                    <div class="partner-name">${esc(best.name)}</div>
+                    <div class="partner-stats">
+                        <span class="stat-badge">${esc(best.games_together)}场</span>
+                        <span class="stat-badge">${esc(best.win_rate)}%胜率</span>
+                        <span class="stat-badge highlight">综合得分 ${esc(best.combined_score)}</span>
+                    </div>
+                </div>
+                ${allPartners.length > 1 ? `
+                <div class="partner-list">
+                    <div class="partner-list-title">所有搭档排行</div>
+                    ${allPartners.slice(0, 5).map((p, i) => `
+                        <div class="partner-item ${i === 0 ? 'top' : ''}">
+                            <span class="partner-rank">${i + 1}</span>
+                            <span class="partner-info">${esc(p.name)}</span>
+                            <span class="partner-detail">${esc(p.games_together)}场 ${esc(p.win_rate)}%</span>
+                        </div>
+                    `).join('')}
+                </div>
+                ` : ''}
+            </div>
+        `;
+
+    } catch (error) {
+        console.error('loadBestPartner error:', error);
+        container.innerHTML = `
+            <div class="empty-state">
+                <div class="empty-title">加载失败</div>
+                <p>${esc(error.message)}</p>
             </div>
         `;
     }

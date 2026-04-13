@@ -96,12 +96,15 @@
             <div class="section-header">
                 <h3 class="section-title">比赛记录</h3>
             </div>
-            <!-- 筛选器 -->
-            <div class="records-filter">
-                <span class="filter-label">筛选：</span>
-                <button class="filter-btn active" data-filter="all" onclick="setMatchFilter('all')">全部</button>
-                <button class="filter-btn" data-filter="admin" onclick="setMatchFilter('admin')">管理员</button>
-                <button class="filter-btn" data-filter="mine" onclick="setMatchFilter('mine')">我的</button>
+            <!-- 筛选器 - 球员卡片选择 -->
+            <div class="player-filter-section" id="playerFilterSection">
+                <div class="player-filter-header">
+                    <span class="filter-label">筛选球员：</span>
+                    <button class="clear-filter-btn" onclick="clearPlayerFilter()">清除筛选</button>
+                </div>
+                <div class="player-filter-chips" id="playerFilterChips">
+                    <!-- 动态加载球员卡片 -->
+                </div>
             </div>
             <div id="recordsContainer">
                 <div class="loading"><div class="spinner"></div></div>
@@ -141,6 +144,14 @@
                         <div class="stat-value" id="totalWinRate">0%</div>
                         <div class="stat-label">胜率</div>
                     </div>
+                </div>
+            </div>
+
+            <!-- Best Partner Section -->
+            <div class="best-partner-section" id="bestPartnerSection">
+                <h4 class="best-partner-title">🏅 最佳搭档</h4>
+                <div id="bestPartnerContainer">
+                    <div class="loading"><div class="spinner"></div></div>
                 </div>
             </div>
 

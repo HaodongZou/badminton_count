@@ -22,7 +22,30 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
-app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', os.urandom(24).hex())
+
+
+def _get_or_create_secret_key():
+    """获取 SECRET_KEY：优先环境变量，其次持久化文件，最后生成并保存"""
+    # 1. 环境变量（Docker 部署推荐方式）
+    secret = os.environ.get('SECRET_KEY')
+    if secret:
+        return secret
+
+    # 2. 持久化到文件（本地开发时保证重启后不变）
+    key_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.secret_key')
+    if os.path.exists(key_file):
+        with open(key_file, 'r') as f:
+            return f.read().strip()
+
+    # 3. 首次启动：生成并保存
+    secret = os.urandom(24).hex()
+    with open(key_file, 'w') as f:
+        f.write(secret)
+    logger.info(f"Generated new SECRET_KEY and saved to {key_file}")
+    return secret
+
+
+app.config['SECRET_KEY'] = _get_or_create_secret_key()
 app.config['APPLICATION_ROOT'] = os.environ.get('APPLICATION_ROOT', '/')
 
 DATABASE = os.environ.get('DATABASE_PATH', 'badminton.db')
@@ -33,7 +56,14 @@ DISABLE_AUTH = os.environ.get('DISABLE_AUTH', 'false').lower() == 'true'
 
 # 登录配置
 LOGIN_USER = os.environ.get('LOGIN_USER', 'admin')
-LOGIN_PASSWORD = os.environ.get('LOGIN_PASSWORD', 'badminton123')
+_LOGIN_PASSWORD_PLAIN = os.environ.get('LOGIN_PASSWORD', 'badminton123')  # 明文密码（兼容旧部署）
+_LOGIN_PASSWORD_HASH = os.environ.get('LOGIN_PASSWORD_HASH')  # bcrypt 哈希（生产推荐）
+if _LOGIN_PASSWORD_HASH:
+    def _check_admin_password(password):
+        return check_password_hash(_LOGIN_PASSWORD_HASH, password)
+else:
+    def _check_admin_password(password):
+        return password == _LOGIN_PASSWORD_PLAIN
 
 # ELO 评分系统配置
 DEFAULT_ELO = 1500
@@ -122,12 +152,24 @@ def initialize_player_rating(conn, cursor, player_name):
             (player_name, DEFAULT_ELO)
         )
 
-def update_ratings_after_match(my_team, opp_team, my_won, conn=None):
+def count_player_matches(cursor, player_name):
+    """从matches表直接统计某玩家的参赛场次（含所有胜负情况）"""
+    cursor.execute('''
+        SELECT COUNT(*) FROM matches
+        WHERE my_team LIKE ? OR opponent_team LIKE ?
+    ''', (f'%{player_name}%', f'%{player_name}%'))
+    return cursor.fetchone()[0]
+
+
+def update_ratings_after_match(my_team, opp_team, my_won, conn=None, processed_counts=None):
     """
-    比赛结束后更新双方ELO评分
+    比赛结束后更新双方ELO评分（按场次更新，非按局）
     my_team: 我方玩家列表
     opp_team: 对方玩家列表
     my_won: True表示我方获胜
+    processed_counts: 可选dict，key为玩家名，value为其已处理的非平局比赛场次。
+                      若不传，则从matches表实时统计（用于实时记录）。
+                      若传入，则用此计数器计算K因子（用于recalculate重放）。
     """
     close_conn = False
     if conn is None:
@@ -140,14 +182,14 @@ def update_ratings_after_match(my_team, opp_team, my_won, conn=None):
     # 获取所有玩家当前评分
     ratings = {}
     for p in all_players:
-        cursor.execute('SELECT elo_rating, games_played FROM player_ratings WHERE player_name = ?', (p,))
+        cursor.execute('SELECT elo_rating FROM player_ratings WHERE player_name = ?', (p,))
         row = cursor.fetchone()
         if row:
-            ratings[p] = {'elo': row['elo_rating'], 'games': row['games_played']}
+            ratings[p] = {'elo': row['elo_rating']}
         else:
-            ratings[p] = {'elo': DEFAULT_ELO, 'games': 0}
+            ratings[p] = {'elo': DEFAULT_ELO}
             cursor.execute(
-                'INSERT INTO player_ratings (player_name, elo_rating, games_played) VALUES (?, ?, 0)',
+                'INSERT INTO player_ratings (player_name, elo_rating) VALUES (?, ?)',
                 (p, DEFAULT_ELO)
             )
 
@@ -155,32 +197,45 @@ def update_ratings_after_match(my_team, opp_team, my_won, conn=None):
     winner_team = my_team if my_won else opp_team
     loser_team = opp_team if my_won else my_team
 
-    # 计算双方平均ELO
-    winner_avg = sum(ratings[p]['elo'] for p in winner_team) / len(winner_team)
-    loser_avg = sum(ratings[p]['elo'] for p in loser_team) / len(loser_team)
+    # 每个玩家根据自己的对手计算预期和实际得分（基于旧ELO，不能就地更新）
+    changes = {}  # 先计算所有变化，最后统一应用
+    for p in all_players:
+        if p in my_team:
+            opponents = opp_team
+            actual = 1.0 if my_won else 0.0
+        else:
+            opponents = my_team
+            actual = 0.0 if my_won else 1.0
 
-    # 计算ELO变化（基于总场次平均值）
-    total_games = sum(ratings[p]['games'] for p in all_players) / len(all_players)
-    k = get_k_factor(int(total_games))
-    expected = calculate_expected_score(winner_avg, loser_avg)
-    change = round(k * (1 - expected))
+        # 计算对每个对手的预期得分，然后取平均（使用旧ELO）
+        expected = 0.0
+        for opp in opponents:
+            expected += calculate_expected_score(ratings[p]['elo'], ratings[opp]['elo'])
+        expected = expected / len(opponents)
 
-    # 应用变化
-    for p in winner_team:
-        ratings[p]['elo'] += change
-        ratings[p]['games'] += 1
-    for p in loser_team:
-        ratings[p]['elo'] -= change
-        ratings[p]['games'] += 1
+        # games_played：实时记录时从matches表统计；recalculate时用processed_counts
+        if processed_counts is not None:
+            games_played = processed_counts.get(p, 0)
+        else:
+            games_played = count_player_matches(cursor, p)
+        k = get_k_factor(games_played)
+        change = round(k * (actual - expected))
+
+        changes[p] = {'elo_change': change}
+
+    # 统一应用变化
+    for p, data in changes.items():
+        ratings[p]['elo'] += data['elo_change']
 
     # 持久化
     for p, data in ratings.items():
+        games_played = count_player_matches(cursor, p)
         cursor.execute('''
             INSERT INTO player_ratings (player_name, elo_rating, games_played, updated_at)
             VALUES (?, ?, ?, CURRENT_TIMESTAMP)
             ON CONFLICT(player_name) DO UPDATE SET
                 elo_rating = ?, games_played = ?, updated_at = CURRENT_TIMESTAMP
-        ''', (p, data['elo'], data['games'], data['elo'], data['games']))
+        ''', (p, data['elo'], games_played, data['elo'], games_played))
 
     conn.commit()
     if close_conn:
@@ -197,7 +252,10 @@ def recalculate_all_ratings():
     cursor.execute('DELETE FROM player_ratings')
     conn.commit()
 
-    # 按时间顺序重放所有比赛（逐局更新ELO）
+    # 跟踪每个玩家已处理的非平局比赛场次（用于K因子计算）
+    processed_counts = {}
+
+    # 按时间顺序重放所有比赛（按场次更新ELO）
     cursor.execute('SELECT * FROM matches ORDER BY date ASC')
     for match in cursor.fetchall():
         my_team = resolve_team([p.strip() for p in match['my_team'].split(',') if p.strip()])
@@ -208,11 +266,16 @@ def recalculate_all_ratings():
             initialize_player_rating(conn, cursor, p)
         conn.commit()
 
-        # 逐局更新ELO
-        for game in scores:
-            my_score, opp_score = game[0], game[1]
-            my_won = my_score > opp_score
-            update_ratings_after_match(my_team, opp_team, my_won, conn)
+        # 按场次更新ELO（只调用一次）
+        winner = determine_winner(scores)
+        if winner == 'draw':
+            continue  # 平局不改变ELO，且不计入已处理场次
+        my_won = (winner == 'me')
+        update_ratings_after_match(my_team, opp_team, my_won, conn, processed_counts)
+
+        # 更新已处理场次计数
+        for p in my_team + opp_team:
+            processed_counts[p] = processed_counts.get(p, 0) + 1
 
     conn.close()
 
@@ -221,11 +284,11 @@ def get_rankings():
     conn = get_db()
     cursor = conn.cursor()
 
-    # 获取所有玩家评分
-    cursor.execute('SELECT * FROM player_ratings ORDER BY elo_rating DESC, games_played DESC')
-    ratings = [dict(row) for row in cursor.fetchall()]
+    # 获取匿名球员列表
+    cursor.execute('SELECT display_name FROM anonymous_players')
+    anonymous_players = set(row['display_name'] for row in cursor.fetchall())
 
-    # 获取每个玩家的胜率统计（逐局计算）
+    # 获取每个玩家的胜率统计（逐局计算）+ 从matches表统计games_played
     cursor.execute('SELECT my_team, opponent_team, scores FROM matches')
     matches = cursor.fetchall()
 
@@ -237,7 +300,11 @@ def get_rankings():
 
         for p in my_team + opp_team:
             if p not in player_stats:
-                player_stats[p] = {'wins': 0, 'losses': 0}
+                player_stats[p] = {'wins': 0, 'losses': 0, 'matches': 0}
+
+        # 每场比赛（match）计为1场参与
+        for p in my_team + opp_team:
+            player_stats[p]['matches'] += 1
 
         # 逐局计算胜负
         for game in scores:
@@ -255,11 +322,15 @@ def get_rankings():
                 for p in my_team:
                     player_stats[p]['losses'] += 1
 
-    # 构建排名列表
+    # 构建排名列表（从player_ratings获取ELO，games_played从player_stats['matches']取，来源统一为matches表）
     rankings = []
-    for row in ratings:
+    cursor.execute('SELECT player_name, elo_rating FROM player_ratings')
+    for row in cursor.fetchall():
         p = row['player_name']
-        stats = player_stats.get(p, {'wins': 0, 'losses': 0})
+        # 跳过匿名球员
+        if p in anonymous_players:
+            continue
+        stats = player_stats.get(p, {'wins': 0, 'losses': 0, 'matches': 0})
         total = stats['wins'] + stats['losses']
         win_rate = round(stats['wins'] / total * 100, 1) if total > 0 else 0.0
         rankings.append({
@@ -269,7 +340,7 @@ def get_rankings():
             'wins': stats['wins'],
             'losses': stats['losses'],
             'win_rate': win_rate,
-            'games_played': row['games_played']
+            'games_played': stats['matches']
         })
 
     # 排序：ELO降序 > 场次降序 > 名字字母升序
@@ -324,6 +395,12 @@ def init_db():
             elo_rating INTEGER DEFAULT 1500,
             games_played INTEGER DEFAULT 0,
             updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS anonymous_players (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            display_name TEXT NOT NULL UNIQUE
         )
     ''')
 
@@ -414,6 +491,39 @@ def _parse_chinese_number(text):
             total = total * 10 + CHINESE_NUMBERS[char]
     return total
 
+ANONYMOUS_KEYWORDS = ['未知', '不认识', '陌生人', '匿名']
+
+def _mark_anonymous_players(players):
+    """
+    检测并标记匿名球员。
+    如果球员名字在匿名关键词列表中，将其存入 anonymous_players 表，
+    并在返回结果中标记。
+    返回: (marked_players, anonymous_names)
+    """
+    anonymous_names = []
+    conn = get_db()
+    cursor = conn.cursor()
+    
+    for player in players:
+        if player in ANONYMOUS_KEYWORDS:
+            # 存入 anonymous_players 表（如果不存在）
+            cursor.execute('INSERT OR IGNORE INTO anonymous_players (display_name) VALUES (?)', (player,))
+            anonymous_names.append(player)
+    
+    conn.commit()
+    conn.close()
+    
+    return anonymous_names
+
+def _is_anonymous_player(name):
+    """检查是否为匿名球员"""
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute('SELECT id FROM anonymous_players WHERE display_name = ?', (name,))
+    result = cursor.fetchone()
+    conn.close()
+    return result is not None
+
 def _parse_win_loss_pattern(text):
     """
     检测并解析胜负模式，返回 (我的胜局数, 我的负局数) 或 None
@@ -501,7 +611,7 @@ def _parse_win_loss_pattern(text):
 
     # 格式7: 第一局赢了/输了、第二局赢了/输了
     ju_win_losses = []
-    ju_pattern = r'第([零一二三四五六七八九十两\d]+)局[赢了输]'
+    ju_pattern = r'第([零一二三四五六七八九十两\d]+)[局把][赢了输]'
     for m in re.finditer(ju_pattern, text_no_space):
         outcome = m.group(0)[-1]
         ju_win_losses.append(outcome)
@@ -536,10 +646,10 @@ def _parse_ju_results(text):
     results = []
 
     # 匹配第X局赢了/输了（赢了/输了可能有两个字）
-    ju_pattern = r'第([零一二三四五六七八九十两\d]+)局[赢了输][了]*'
+    ju_pattern = r'第([零一二三四五六七八九十两\d]+)[局把][赢了输][了]*'
     for m in re.finditer(ju_pattern, text_no_space):
-        outcome = m.group(0)[-1]
-        results.append('win' if outcome in ['赢', '胜'] else 'loss')
+        outcome_char = m.group(0)[-2]  # 倒数第二个字符是赢/输
+        results.append('win' if outcome_char in ['赢', '胜'] else 'loss')
 
     # 两局都赢了/输了
     if '两局都赢了' in text_no_space or '都赢了' in text_no_space:
@@ -560,7 +670,7 @@ def _parse_ju_results_with_game_numbers(text):
     results = {}
 
     # 匹配第X局赢了/输了（赢了/输了可能有两个字）
-    ju_pattern = r'第([零一二三四五六七八九十两\d]+)局[赢了输][了]*'
+    ju_pattern = r'第([零一二三四五六七八九十两\d]+)[局把][赢了输][了]*'
     for m in re.finditer(ju_pattern, text_no_space):
         game_num_str = m.group(1)
         game_num = _parse_chinese_number(game_num_str)
@@ -685,10 +795,10 @@ def parse_match_input(text):
 
     # ========== 3. 移除比分和局数标记，得到纯选手文本 ==========
     # 移除局数标记和胜负结果：第1局赢了、第2局输了、两局都赢了 等
-    ju_pattern = r'第[一二三四五六七八九十零\d]+局[赢了输]*|两局都[赢了输]+|都[赢了输]+|平局'
+    ju_pattern = r'第[一二三四五六七八九十零\d]+[局把][赢了输]*|两局都[赢了输]+|都[赢了输]+|平局'
     players_text = re.sub(ju_pattern, '', text)  # 移除局数标记和胜负
     players_text = re.sub(score_pattern, '', players_text)  # 移除比分
-    players_text = players_text.rstrip('，,。.')
+    players_text = players_text.rstrip('，,。. \t')
 
     # ========== 3. 按"打"字分割 ==========
     da_pos = players_text.find('打')
@@ -725,6 +835,10 @@ def parse_match_input(text):
     # 清理空名字（但保留"我"）
     result['my_team'] = [p for p in result['my_team'] if p and p != '我']
     result['opponent_team'] = [p for p in result['opponent_team'] if p]
+
+    # ========== 5.1 标记匿名球员 ==========
+    all_players = result['my_team'] + result['opponent_team']
+    _mark_anonymous_players(all_players)
 
     # 如果输入中包含"我"，确保"我"在己方队伍中
     if '我' in text and '我' not in result['my_team']:
@@ -892,7 +1006,7 @@ def api_login():
     password = data.get('password', '')
 
     # 优先检查管理员账号
-    if username == LOGIN_USER and password == LOGIN_PASSWORD:
+    if username == LOGIN_USER and _check_admin_password(password):
         token = generate_token(username, is_admin=True)
         session['user'] = username
         session['is_admin'] = True
@@ -1008,36 +1122,69 @@ def index():
 
 @app.route('/api/matches', methods=['GET'])
 def get_matches():
-    """获取所有比赛记录（支持筛选）"""
-    filter_type = request.args.get('filter', 'all')  # all, admin, mine
+    """获取所有比赛记录（支持按球员筛选和分页）"""
+    filter_type = request.args.get('filter', 'all')  # all, admin, mine (deprecated, use players instead)
+    players = request.args.get('players', None)  # comma-separated list of player names to filter by
+    page = request.args.get('page', 1, type=int)
+    limit = request.args.get('limit', 50, type=int)
+    offset = (page - 1) * limit
 
     conn = get_db()
     cursor = conn.cursor()
 
-    if filter_type == 'mine':
+    if players:
+        player_list = [p.strip() for p in players.split(',') if p.strip()]
+        if player_list:
+            conditions = []
+            params = []
+            for player in player_list:
+                conditions.append('(my_team LIKE ? OR opponent_team LIKE ?)')
+                params.extend([f'%{player}%', f'%{player}%'])
+            where_clause = " WHERE " + " AND ".join(conditions)
+            count_sql = 'SELECT COUNT(*) FROM matches' + where_clause
+            cursor.execute(count_sql, params)
+            total = cursor.fetchone()[0]
+            sql = f'SELECT * FROM matches{where_clause} ORDER BY date DESC LIMIT ? OFFSET ?'
+            cursor.execute(sql, params + [limit, offset])
+            matches = [dict(row) for row in cursor.fetchall()]
+        else:
+            total = 0
+            matches = []
+    elif filter_type == 'mine':
         user_data = get_current_user()
         if user_data:
             cursor.execute(
-                'SELECT * FROM matches WHERE created_by = ? ORDER BY date DESC',
-                (user_data['user'],)
+                'SELECT COUNT(*) FROM matches WHERE created_by = ?', (user_data['user'],)
+            )
+            total = cursor.fetchone()[0]
+            cursor.execute(
+                'SELECT * FROM matches WHERE created_by = ? ORDER BY date DESC LIMIT ? OFFSET ?',
+                (user_data['user'], limit, offset)
             )
         else:
-            cursor.execute('SELECT * FROM matches WHERE 1=0 ORDER BY date DESC')
+            total = 0
+            cursor.execute('SELECT * FROM matches WHERE 1=0')
+        matches = [dict(row) for row in cursor.fetchall()]
     elif filter_type == 'admin':
+        cursor.execute('SELECT COUNT(*) FROM matches WHERE created_by = ?', (LOGIN_USER,))
+        total = cursor.fetchone()[0]
         cursor.execute(
-            "SELECT * FROM matches WHERE created_by = ? ORDER BY date DESC",
-            (LOGIN_USER,)
+            'SELECT * FROM matches WHERE created_by = ? ORDER BY date DESC LIMIT ? OFFSET ?',
+            (LOGIN_USER, limit, offset)
         )
+        matches = [dict(row) for row in cursor.fetchall()]
     else:
-        cursor.execute('SELECT * FROM matches ORDER BY date DESC')
+        cursor.execute('SELECT COUNT(*) FROM matches')
+        total = cursor.fetchone()[0]
+        cursor.execute('SELECT * FROM matches ORDER BY date DESC LIMIT ? OFFSET ?', (limit, offset))
+        matches = [dict(row) for row in cursor.fetchall()]
 
-    matches = [dict(row) for row in cursor.fetchall()]
     conn.close()
 
     for m in matches:
         m['scores'] = json.loads(m['scores'])
 
-    return jsonify(matches)
+    return jsonify({'matches': matches, 'page': page, 'limit': limit, 'total': total})
 
 @app.route('/api/matches/preview', methods=['POST'])
 @require_auth
@@ -1127,16 +1274,14 @@ def add_match():
 
     match_id = cursor.lastrowid
 
-    # 更新ELO评分（逐局更新）
-    all_elo_changes = {}
-    for game in parsed['scores']:
-        my_score, opp_score = game[0], game[1]
-        my_won = my_score > opp_score
-        game_elo_changes = update_ratings_after_match(my_team_resolved, opp_team_resolved, my_won, conn)
-        # 累加每局的变化（只记录方向）
-        for p, new_elo in game_elo_changes.items():
-            if p not in all_elo_changes:
-                all_elo_changes[p] = new_elo
+    # 更新ELO评分（按场次一次性更新）
+    winner = determine_winner(parsed['scores'])
+    if winner == 'draw':
+        # 平局不改变ELO
+        all_elo_changes = {p: get_player_rating(p)['elo'] for p in my_team_resolved + opp_team_resolved}
+    else:
+        my_won = winner == 'me'
+        all_elo_changes = update_ratings_after_match(my_team_resolved, opp_team_resolved, my_won, conn)
 
     cursor.execute('SELECT * FROM matches WHERE id = ?', (match_id,))
     match = dict(cursor.fetchone())
@@ -1306,6 +1451,10 @@ def get_player_stats(player_name):
 
     canonical_name = resolve_player_name(player_name)
 
+    # 拒绝匿名球员的统计请求
+    if _is_anonymous_player(canonical_name):
+        return jsonify({'error': '匿名球员没有个人统计'}), 403
+
     # 构建SQL查询，使用SQL层过滤
     conn = get_db()
     cursor = conn.cursor()
@@ -1433,6 +1582,11 @@ def get_all_players():
     """获取所有选手列表"""
     conn = get_db()
     cursor = conn.cursor()
+    
+    # 获取匿名球员列表
+    cursor.execute('SELECT display_name FROM anonymous_players')
+    anonymous_players = set(row['display_name'] for row in cursor.fetchall())
+    
     cursor.execute('SELECT DISTINCT my_team, opponent_team FROM matches')
     rows = cursor.fetchall()
 
@@ -1444,7 +1598,9 @@ def get_all_players():
             for player in team.split(','):
                 if player:
                     resolved = resolve_player_name(player.strip())
-                    players.add(resolved)
+                    # 排除匿名球员
+                    if resolved not in anonymous_players:
+                        players.add(resolved)
 
     conn.close()
     return jsonify(sorted(list(players)))
@@ -1479,6 +1635,90 @@ def delete_player(name):
     clear_alias_cache()
 
     return jsonify({'success': True, 'deleted_count': deleted})
+
+@app.route('/api/players/<name>/best-partner', methods=['GET'])
+def get_best_partner(name):
+    """获取某球员的最佳搭档（按胜率×场次权重综合计算）"""
+    canonical_name = resolve_player_name(urllib.parse.unquote(name))
+    
+    conn = get_db()
+    cursor = conn.cursor()
+    
+    # 找出所有与该球员搭档过的队友及其战绩
+    # 需要处理双打: 我方2人 vs 对方2人
+    # 当 canonical_name 在 my_team 时，队友是 my_team 的其他人
+    # 当 canonical_name 在 opponent_team 时，队友是 opponent_team 的其他人
+    
+    partner_stats = {}  # {partner_name: {'wins': 0, 'games': 0}}
+
+    # 预查询所有匿名球员，避免 N+1
+    cursor.execute('SELECT display_name FROM anonymous_players')
+    anonymous_players = set(row['display_name'] for row in cursor.fetchall())
+
+    cursor.execute('SELECT my_team, opponent_team, scores FROM matches')
+    for row in cursor.fetchall():
+        my_team = [p.strip() for p in row['my_team'].split(',') if p.strip()]
+        opp_team = [p.strip() for p in row['opponent_team'].split(',') if p.strip()]
+
+        my_team_resolved = resolve_team(my_team)
+        opp_team_resolved = resolve_team(opp_team)
+
+        scores = json.loads(row['scores']) if row['scores'] else []
+
+        # 确定当前球员在哪一方
+        if canonical_name in my_team_resolved:
+            is_my_side = True
+            teammates = [p for p in my_team_resolved if p != canonical_name]
+            opponents = opp_team_resolved
+        elif canonical_name in opp_team_resolved:
+            is_my_side = False
+            teammates = [p for p in opp_team_resolved if p != canonical_name]
+            opponents = my_team_resolved
+        else:
+            continue
+
+        # 跳过匿名球员（O(1) set lookup）
+        if canonical_name in anonymous_players:
+            continue
+        
+        # 统计该场比赛的胜负
+        my_wins = sum(1 for s in scores if s[0] > s[1])
+        opp_wins = sum(1 for s in scores if s[1] > s[0])
+        won = my_wins > opp_wins if is_my_side else opp_wins > my_wins
+        
+        # 对每个队友统计
+        for teammate in teammates:
+            if teammate not in partner_stats:
+                partner_stats[teammate] = {'wins': 0, 'games': 0}
+            partner_stats[teammate]['games'] += 1
+            if won:
+                partner_stats[teammate]['wins'] += 1
+    
+    conn.close()
+    
+    # 计算综合得分: win_rate * min(games/10, 1.0)
+    results = []
+    for partner, stats in partner_stats.items():
+        games = stats['games']
+        wins = stats['wins']
+        win_rate = (wins / games * 100) if games > 0 else 0
+        combined_score = win_rate * min(games / 10, 1.0)
+        results.append({
+            'name': partner,
+            'games_together': games,
+            'wins': wins,
+            'win_rate': round(win_rate, 1),
+            'combined_score': round(combined_score, 1)
+        })
+    
+    # 按综合得分排序
+    results.sort(key=lambda x: -x['combined_score'])
+    
+    return jsonify({
+        'player': canonical_name,
+        'best_partner': results[0] if results else None,
+        'all_partners': results
+    })
 
 @app.route('/health', methods=['GET'])
 def health_check():

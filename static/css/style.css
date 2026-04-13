@@ -786,6 +786,114 @@ main {
     box-shadow: var(--shadow);
 }
 
+/* Best Partner Section */
+.best-partner-section {
+    background: var(--card-bg);
+    border-radius: var(--radius);
+    padding: 20px 24px;
+    box-shadow: var(--shadow);
+    margin-bottom: 24px;
+}
+
+.best-partner-title {
+    margin: 0 0 16px 0;
+    font-size: 1rem;
+    color: var(--text);
+}
+
+.best-partner-card {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.partner-main {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 12px 16px;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    border-radius: 10px;
+    color: white;
+}
+
+.partner-name {
+    font-size: 1.25rem;
+    font-weight: 600;
+}
+
+.partner-stats {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.stat-badge {
+    padding: 4px 10px;
+    background: rgba(255,255,255,0.2);
+    border-radius: 12px;
+    font-size: 0.85rem;
+}
+
+.stat-badge.highlight {
+    background: rgba(255,255,255,0.35);
+    font-weight: 600;
+}
+
+.partner-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.partner-list-title {
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+    margin-bottom: 4px;
+}
+
+.partner-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 6px 10px;
+    background: var(--bg);
+    border-radius: 6px;
+    font-size: 0.9rem;
+}
+
+.partner-item.top {
+    background: linear-gradient(135deg, #f6d365 0%, #fda085 100%);
+    color: #333;
+}
+
+.partner-rank {
+    width: 20px;
+    height: 20px;
+    background: var(--primary);
+    color: white;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.75rem;
+    font-weight: 600;
+}
+
+.partner-item.top .partner-rank {
+    background: #333;
+}
+
+.partner-info {
+    flex: 1;
+    font-weight: 500;
+}
+
+.partner-detail {
+    color: var(--text-secondary);
+    font-size: 0.85rem;
+}
+
 /* Alias Section */
 .alias-section {
     background: var(--card-bg);
@@ -1596,6 +1704,66 @@ main {
     background: #FF6B35;
     color: white;
     border-color: #FF6B35;
+}
+
+/* 筛选器 - 球员卡片样式 */
+.player-filter-section {
+    padding: 12px 16px;
+    background: var(--card-bg);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    margin-bottom: 16px;
+}
+
+.player-filter-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 10px;
+}
+
+.player-filter-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.player-filter-chips .player-chip {
+    background: var(--card-bg);
+    border: 2px solid #ddd;
+    color: var(--text);
+    padding: 6px 14px;
+    border-radius: 20px;
+    font-size: 0.9rem;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.player-filter-chips .player-chip:hover {
+    border-color: var(--primary);
+    background: rgba(45, 90, 39, 0.08);
+}
+
+.player-filter-chips .player-chip.active {
+    background: var(--primary);
+    color: white;
+    border-color: var(--primary);
+}
+
+.clear-filter-btn {
+    font-size: 13px;
+    color: var(--text-secondary);
+    background: none;
+    border: 1px solid #ddd;
+    border-radius: 6px;
+    padding: 4px 10px;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.clear-filter-btn:hover {
+    color: var(--lose);
+    border-color: var(--lose);
 }
 
 /* 创建者标签样式 */
