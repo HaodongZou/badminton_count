@@ -101,7 +101,7 @@ def call_llm_parse(text: str) -> dict:
     }
 
     try:
-        with httpx.Client(timeout=15.0) as client:
+        with httpx.Client(timeout=15.0, trust_env=False) as client:
             response = client.post(url, headers=headers, json=payload)
             response.raise_for_status()
             result = response.json()
