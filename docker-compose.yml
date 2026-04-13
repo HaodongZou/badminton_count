@@ -6,7 +6,7 @@ services:
     environment:
       - DATABASE_PATH=/data/badminton.db
       - SECRET_KEY=${SECRET_KEY:?SECRET_KEY required}
-      - LLM_BASE_URL=https://api.minimaxi.com/anthropic
+      - LLM_BASE_URL=https://api.minimax.com/anthropic
       - LLM_MODEL=MiniMax-M2.7
       # - LLM_API_KEY=   # 设置在 .env 或部署时注入
     volumes:

@@ -10,7 +10,7 @@ import httpx
 logger = logging.getLogger(__name__)
 
 # LLM 配置（从环境变量读取）
-LLM_BASE_URL = os.environ.get("LLM_BASE_URL", "https://api.minimaxi.com/anthropic")
+LLM_BASE_URL = os.environ.get("LLM_BASE_URL", "https://api.minimax.com/anthropic")
 LLM_API_KEY = os.environ.get("LLM_API_KEY", "sk-cp-w9Bp5jaIhRjRzJj5016ALUHoD9IJ3WYrVgyzEeKvF1aXSpm21fHa5bEB9i0rxVdyWboxNoZMarsyiAJ4kkxrsc7WusvAji1nZSaGQCEv_fPUI-KsdGAkWxE")
 LLM_MODEL = os.environ.get("LLM_MODEL", "MiniMax-M2.7")
 
