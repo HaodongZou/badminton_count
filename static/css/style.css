@@ -1894,3 +1894,133 @@ main {
     color: #999;
     font-size: 1rem;
 }
+
+/* Small spinner for parse button */
+.spinner-sm {
+    display: inline-block;
+    width: 14px;
+    height: 14px;
+    border: 2px solid rgba(255,255,255,0.3);
+    border-top-color: #fff;
+    border-radius: 50%;
+    animation: spin 0.7s linear infinite;
+    vertical-align: middle;
+}
+
+.preview-btn.loading {
+    opacity: 0.7;
+    cursor: not-allowed;
+}
+
+/* Manual input banner (shown on parse failure) */
+.manual-input-banner {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 14px;
+    background: #FFF3E0;
+    border: 1px solid #FFCC80;
+    border-radius: 8px;
+    margin-top: 10px;
+    font-size: 0.9rem;
+    color: #E65100;
+}
+
+.preview-btn.small {
+    padding: 5px 12px;
+    font-size: 0.85rem;
+}
+
+/* Manual input section */
+.manual-input-section {
+    margin-top: 16px;
+    padding: 16px;
+    background: #FAFAF8;
+    border: 1px solid #E0E0DB;
+    border-radius: 10px;
+}
+
+.manual-input-header h4 {
+    margin: 0 0 14px;
+    font-size: 1rem;
+    color: #333;
+}
+
+.manual-form-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    margin-bottom: 14px;
+}
+
+.form-group label {
+    display: block;
+    font-size: 0.85rem;
+    color: #666;
+    margin-bottom: 5px;
+    font-weight: 500;
+}
+
+.team-inputs {
+    display: flex;
+    gap: 8px;
+}
+
+.team-inputs input {
+    flex: 1;
+    padding: 7px 10px;
+    border: 1px solid #CCC;
+    border-radius: 6px;
+    font-size: 0.9rem;
+}
+
+.team-inputs input[style*="none"] {
+    display: none !important;
+}
+
+.manual-form-grid select {
+    padding: 7px 10px;
+    border: 1px solid #CCC;
+    border-radius: 6px;
+    font-size: 0.9rem;
+    background: #fff;
+}
+
+.scores-inputs {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.score-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.9rem;
+}
+
+.score-row span {
+    min-width: 40px;
+    color: #666;
+}
+
+.score-row input {
+    width: 60px;
+    padding: 6px 8px;
+    border: 1px solid #CCC;
+    border-radius: 6px;
+    text-align: center;
+    font-size: 0.9rem;
+}
+
+.score-row input::placeholder {
+    color: #BBB;
+}
+
+.score-row.optional-set {
+    display: none;
+}
+
+.score-row.optional-set[style*="flex"] {
+    display: flex;
+}

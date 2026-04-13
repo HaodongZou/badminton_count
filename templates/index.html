@@ -61,9 +61,13 @@
                     <textarea id="matchInput" placeholder="例如：我和张三打李四和王五，第一局21:12，第二局17:21"></textarea>
                 </div>
 
-                <button class="preview-btn" onclick="previewMatch()">
+                <button id="parseBtn" class="preview-btn" onclick="previewMatch()">
                     <span>🔍</span>
                     <span>解析并预览</span>
+                </button>
+                <button class="preview-btn secondary" onclick="toggleManualInput()">
+                    <span>✏️</span>
+                    <span>手动录入</span>
                 </button>
 
                 <!-- Preview Section -->
@@ -87,6 +91,64 @@
                     <div class="example-text">我和张三打李四和王五，第一局21:12，第二局17:21</div>
                     <div class="example-text">我和张三打李四和王五，第一局赢了，第二局输了</div>
                     <div class="example-text">张三和李四打王五和赵六，第一局23:21，第二局输了</div>
+                </div>
+
+                <!-- 手动录入表单 -->
+                <div class="manual-input-section" id="manualInputSection" style="display: none;">
+                    <div class="manual-input-header">
+                        <h4>✏️ 手动录入比赛</h4>
+                    </div>
+                    <div class="manual-form-grid">
+                        <div class="form-group">
+                            <label>我方球员</label>
+                            <div class="team-inputs" id="myTeamInputs">
+                                <input type="text" id="myPlayer1" placeholder="球员1" />
+                                <input type="text" id="myPlayer2" placeholder="球员2（双打填写）" />
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label>对方球员</label>
+                            <div class="team-inputs" id="oppTeamInputs">
+                                <input type="text" id="oppPlayer1" placeholder="球员1" />
+                                <input type="text" id="oppPlayer2" placeholder="球员2（双打填写）" />
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label>比赛类型</label>
+                            <select id="manualMatchType" onchange="toggleTeamInputs()">
+                                <option value="singles">单打</option>
+                                <option value="doubles">双打</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>比分（格式：我方:对方）</label>
+                            <div class="scores-inputs" id="scoresInputs">
+                                <div class="score-row">
+                                    <span>第1局</span>
+                                    <input type="number" id="score1_1" min="0" max="30" placeholder="我" />
+                                    <span>:</span>
+                                    <input type="number" id="score1_2" min="0" max="30" placeholder="对" />
+                                </div>
+                                <div class="score-row">
+                                    <span>第2局</span>
+                                    <input type="number" id="score2_1" min="0" max="30" placeholder="我" />
+                                    <span>:</span>
+                                    <input type="number" id="score2_2" min="0" max="30" placeholder="对" />
+                                </div>
+                                <div class="score-row optional-set" id="score3Row" style="display:none;">
+                                    <span>第3局</span>
+                                    <input type="number" id="score3_1" min="0" max="30" placeholder="我" />
+                                    <span>:</span>
+                                    <input type="number" id="score3_2" min="0" max="30" placeholder="对" />
+                                </div>
+                            </div>
+                            <button class="preview-btn secondary small" onclick="toggleThirdSet()" id="addThirdSetBtn">+ 第3局</button>
+                        </div>
+                    </div>
+                    <button class="preview-btn" onclick="submitManualInput()">
+                        <span>📋</span>
+                        <span>预览确认</span>
+                    </button>
                 </div>
             </div>
         </div>

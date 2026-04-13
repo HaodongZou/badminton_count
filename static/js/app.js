@@ -19,6 +19,7 @@ let currentPlayer = '我';
 
 // Current pending match text for preview
 let pendingMatchText = '';
+let pendingParsed = null;  // LLM 解析后的结构化结果，供 confirmSave 使用
 
 let currentMatchFilter = 'all'; // all, admin, mine
 
@@ -143,7 +144,9 @@ function showToast(message, type = 'success') {
     setTimeout(() => toast.classList.remove('show'), 3000);
 }
 
-// Preview Match - parse and show result for confirmation
+// Preview Match - LLM parse and show result for confirmation
+let isParsing = false;
+
 async function previewMatch() {
     const input = document.getElementById('matchInput').value.trim();
     if (!input) {
@@ -151,26 +154,177 @@ async function previewMatch() {
         return;
     }
 
+    if (isParsing) return;
+    isParsing = true;
+    setParseButtonLoading(true);
     pendingMatchText = input;
 
     try {
-        const response = await fetch(`${API_BASE}/api/matches/preview`, {
+        // Step 1: LLM 解析
+        const parseRes = await fetch(`${API_BASE}/api/parse_nl`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ text: input })
         });
+        const parseData = await parseRes.json();
 
-        const data = await response.json();
-
-        if (!response.ok) {
-            throw new Error(data.error || '解析失败');
+        if (parseData.error) {
+            showToast(parseData.error, 'error');
+            showManualInputOption();
+            return;
         }
 
-        showPreview(data);
+        // Step 2: 构造 game_results 供预览展示
+        const gameResults = [];
+        const scores = parseData.scores || [];
+        for (let i = 0; i < scores.length; i++) {
+            const [myScore, oppScore] = scores[i];
+            gameResults.push({
+                game: i + 1,
+                my_score: myScore,
+                opp_score: oppScore,
+                result: myScore > oppScore ? '赢' : '输'
+            });
+        }
+
+        // 保存解析结果供 confirmSave 使用
+        pendingParsed = parseData;
+
+        showPreview({ parsed: parseData, game_results: gameResults });
 
     } catch (error) {
-        showToast(error.message, 'error');
+        showToast('解析失败：' + error.message, 'error');
+        showManualInputOption();
+    } finally {
+        isParsing = false;
+        setParseButtonLoading(false);
     }
+}
+
+function setParseButtonLoading(loading) {
+    const btn = document.getElementById('parseBtn');
+    if (!btn) return;
+    if (loading) {
+        btn.disabled = true;
+        btn.classList.add('loading');
+        btn.dataset.originalHTML = btn.innerHTML;
+        btn.innerHTML = '<span class="spinner-sm"></span><span>解析中...</span>';
+    } else {
+        btn.disabled = false;
+        btn.classList.remove('loading');
+        btn.innerHTML = btn.dataset.originalHTML || '<span>🔍</span><span>解析并预览</span>';
+    }
+}
+
+function showManualInputOption() {
+    const section = document.querySelector('.input-section');
+    const existing = document.getElementById('manualInputBanner');
+    if (existing) return;
+    const banner = document.createElement('div');
+    banner.id = 'manualInputBanner';
+    banner.className = 'manual-input-banner';
+    banner.innerHTML = `
+        <span>解析失败？</span>
+        <button class="preview-btn secondary small" onclick="switchToManualInput()">手动录入</button>
+    `;
+    section.appendChild(banner);
+}
+
+function switchToManualInput() {
+    document.getElementById('manualInputBanner')?.remove();
+    const manualSection = document.getElementById('manualInputSection');
+    if (manualSection) {
+        manualSection.style.display = 'block';
+        manualSection.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+}
+
+function toggleManualInput() {
+    const section = document.getElementById('manualInputSection');
+    if (!section) return;
+    const isHidden = section.style.display === 'none' || section.style.display === '';
+    section.style.display = isHidden ? 'block' : 'none';
+    if (isHidden) {
+        section.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        // 同步 match type → 显示/隐藏第二球员输入框
+        toggleTeamInputs();
+    }
+}
+
+function toggleTeamInputs() {
+    const matchType = document.getElementById('manualMatchType')?.value;
+    const my2 = document.getElementById('myPlayer2');
+    const opp2 = document.getElementById('oppPlayer2');
+    if (!my2 || !opp2) return;
+    const isDoubles = matchType === 'doubles';
+    my2.style.display = isDoubles ? 'inline-block' : 'none';
+    my2.required = isDoubles;
+    opp2.style.display = isDoubles ? 'inline-block' : 'none';
+    opp2.required = isDoubles;
+}
+
+function toggleThirdSet() {
+    const row = document.getElementById('score3Row');
+    const btn = document.getElementById('addThirdSetBtn');
+    if (!row) return;
+    const isHidden = row.style.display === 'none';
+    row.style.display = isHidden ? 'flex' : 'none';
+    if (btn) btn.textContent = isHidden ? '- 第3局' : '+ 第3局';
+}
+
+function submitManualInput() {
+    const matchType = document.getElementById('manualMatchType')?.value || 'singles';
+    const myPlayer1 = document.getElementById('myPlayer1')?.value.trim();
+    const myPlayer2 = document.getElementById('myPlayer2')?.value.trim();
+    const oppPlayer1 = document.getElementById('oppPlayer1')?.value.trim();
+    const oppPlayer2 = document.getElementById('oppPlayer2')?.value.trim();
+
+    if (!myPlayer1 || !oppPlayer1) {
+        showToast('请填写双方球员', 'error');
+        return;
+    }
+
+    if (matchType === 'doubles' && (!myPlayer2 || !oppPlayer2)) {
+        showToast('双打需要填写双方各两名球员', 'error');
+        return;
+    }
+
+    const myTeam = matchType === 'doubles'
+        ? [myPlayer1, myPlayer2].filter(Boolean)
+        : [myPlayer1];
+    const oppTeam = matchType === 'doubles'
+        ? [oppPlayer1, oppPlayer2].filter(Boolean)
+        : [oppPlayer1];
+
+    const scores = [];
+    const pushScore = (idx) => {
+        const my = parseInt(document.getElementById(`score${idx}_1`)?.value) || 0;
+        const opp = parseInt(document.getElementById(`score${idx}_2`)?.value) || 0;
+        if (my > 0 || opp > 0) scores.push([my, opp]);
+    };
+    pushScore(1);
+    pushScore(2);
+    if (document.getElementById('score3Row')?.style.display !== 'none') {
+        pushScore(3);
+    }
+
+    if (scores.length === 0) {
+        showToast('请至少填写一局比分', 'error');
+        return;
+    }
+
+    const parsed = { my_team: myTeam, opponent_team: oppTeam, scores, match_type: matchType };
+
+    const gameResults = scores.map(([myScore, oppScore], i) => ({
+        game: i + 1,
+        my_score: myScore,
+        opp_score: oppScore,
+        result: myScore > oppScore ? '赢' : '输'
+    }));
+
+    pendingParsed = parsed;
+    pendingMatchText = '(手动录入)';
+    showPreview({ parsed, game_results: gameResults });
 }
 
 function showPreview(data) {
@@ -215,10 +369,11 @@ function showPreview(data) {
 function hidePreview() {
     document.getElementById('previewSection').style.display = 'none';
     pendingMatchText = '';
+    pendingParsed = null;
 }
 
 async function confirmSave() {
-    if (!pendingMatchText) {
+    if (!pendingParsed) {
         showToast('请先解析比赛信息', 'error');
         return;
     }
@@ -227,7 +382,13 @@ async function confirmSave() {
         const response = await fetch(`${API_BASE}/api/matches`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
-            body: JSON.stringify({ text: pendingMatchText })
+            body: JSON.stringify({
+                // 直接传结构化数据，不再传 text 走后端正则解析
+                my_team: pendingParsed.my_team,
+                opponent_team: pendingParsed.opponent_team,
+                scores: pendingParsed.scores,
+                match_type: pendingParsed.match_type,
+            })
         });
 
         const data = await response.json();
@@ -239,6 +400,8 @@ async function confirmSave() {
         showToast('比赛记录已保存！', 'success');
         document.getElementById('matchInput').value = '';
         hidePreview();
+        pendingMatchText = '';
+        pendingParsed = null;
         loadRecords();
         loadPlayers();
 

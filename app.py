@@ -1228,19 +1228,30 @@ def preview_match():
 @app.route('/api/matches', methods=['POST'])
 @require_auth
 def add_match():
-    """添加比赛记录"""
+    """添加比赛记录，支持 text（正则解析）或结构化数据（my_team/opponent_team/scores/match_type）"""
     data = request.get_json()
     text = data.get('text', '')
 
-    logger.info(f"Adding match: {text[:50]}...")
+    # 优先使用结构化数据（来自手动录入或 LLM 解析后的 confirmSave）
+    has_structured = all(k in data for k in ('my_team', 'opponent_team', 'scores', 'match_type'))
+    if has_structured:
+        parsed = {
+            'my_team': data['my_team'],
+            'opponent_team': data['opponent_team'],
+            'scores': data['scores'],
+            'match_type': data['match_type'],
+        }
+        logger.info(f"Adding match (structured): {parsed['my_team']} vs {parsed['opponent_team']}")
+    elif text:
+        logger.info(f"Adding match: {text[:50]}...")
+        parsed = parse_match_input(text)
+        if parsed.get('error'):
+            logger.warning(f"Add match parse error: {parsed['error']}")
+            return jsonify({'error': parsed['error']}), 400
+    else:
+        return jsonify({'error': '缺少比赛数据，请使用自然语言或结构化格式'}), 400
 
-    parsed = parse_match_input(text)
-
-    # 检查解析错误
-    if parsed.get('error'):
-        logger.warning(f"Add match parse error: {parsed['error']}")
-        return jsonify({'error': parsed['error']}), 400
-
+    # 清理旧的重复错误检查（structured path 已在上方处理过 error）
     if not parsed['my_team'] or not parsed['opponent_team'] or not parsed['scores']:
         logger.warning("Add match failed: missing required fields")
         return jsonify({'error': '无法解析输入，请检查格式'}), 400
@@ -1719,6 +1730,19 @@ def get_best_partner(name):
         'best_partner': results[0] if results else None,
         'all_partners': results
     })
+
+@app.route('/api/parse_nl', methods=['POST'])
+def parse_natural_language():
+    """调用 LLM 解析自然语言比赛描述"""
+    import parse_nl
+    data = request.get_json() or {}
+    text = data.get("text", "").strip()
+    if not text:
+        return jsonify({"error": "输入为空"}), 400
+    result = parse_nl.call_llm_parse(text)
+    if "error" in result:
+        return jsonify(result), 200  # 前端统一处理，展示手动录入入口
+    return jsonify(result), 200
 
 @app.route('/health', methods=['GET'])
 def health_check():
