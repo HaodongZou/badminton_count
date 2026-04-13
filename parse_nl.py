@@ -1,6 +1,6 @@
 """
 羽毛球比赛自然语言解析 — LLM 调用封装
-使用 httpx 直接调用 MiniMax API
+使用 httpx 调用 MiniMax API（Anthropic 兼容格式）
 """
 import os
 import logging
@@ -85,46 +85,56 @@ def call_llm_parse(text: str) -> dict:
     if not text or not text.strip():
         return {"error": "输入为空"}
 
-    url = f"{LLM_BASE_URL}/v1/text/chatcompletion_v2"
+    url = f"{LLM_BASE_URL}/v1/messages"
     headers = {
         "Authorization": f"Bearer {LLM_API_KEY}",
         "Content-Type": "application/json",
+        "anthropic-version": "2023-06-01",
     }
     payload = {
         "model": LLM_MODEL,
+        "max_tokens": 1024,
+        "system": PARSE_SYSTEM_PROMPT,
         "messages": [
-            {"role": "system", "content": PARSE_SYSTEM_PROMPT},
-            {"role": "user", "content": text},
+            {"role": "user", "content": [{"type": "text", "text": text}]}
         ],
-        "temperature": 0.1,
-        "max_tokens": 512,
     }
 
     try:
-        with httpx.Client(timeout=15.0, trust_env=False) as client:
+        with httpx.Client(timeout=20.0, trust_env=False) as client:
             response = client.post(url, headers=headers, json=payload)
             response.raise_for_status()
             result = response.json()
 
-        # 提取 LLM 返回的 content
-        choices = result.get("choices", [])
-        if not choices:
-            logger.error(f"LLM response has no choices: {result}")
+        # 提取 LLM 返回的 content（Anthropic 格式）
+        content_blocks = result.get("content", [])
+        if not content_blocks:
+            logger.error(f"LLM response has no content: {result}")
             return {"error": "LLM 返回格式异常"}
 
-        content = choices[0].get("message", {}).get("content", "").strip()
+        # 取第一个 text 块
+        text_content = ""
+        for block in content_blocks:
+            if block.get("type") == "text":
+                text_content = block.get("text", "")
+                break
+
+        if not text_content:
+            logger.error(f"LLM response has no text block: {result}")
+            return {"error": "LLM 返回内容为空"}
 
         # 去掉可能的 markdown code fence
+        content = text_content.strip()
         if content.startswith("```"):
             lines = content.split("\n")
-            content = "\n".join(lines[1:-1])  # 去掉首尾 ```
+            content = "\n".join(lines[1:-1])
         content = content.strip()
 
         parsed = json.loads(content)
         return parsed
 
     except json.JSONDecodeError as e:
-        logger.error(f"LLM returned non-JSON: {content[:200] if 'content' in dir() else e}")
+        logger.error(f"LLM returned non-JSON: {text_content[:200] if text_content else str(e)}")
         return {"error": "LLM 返回了非 JSON 内容，请尝试手动录入"}
     except httpx.TimeoutException:
         logger.error("LLM request timed out")
